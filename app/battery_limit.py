@@ -145,7 +145,7 @@ def main(args):
     if os.geteuid() != 0:
         from control_runner import request
         request("battery", args)
-    if args == ["run"]:
+    elif args == ["run"]:
         run()
     else:
         change_settings(args)
