@@ -147,10 +147,22 @@ ColumnLayout {
     }
 
     function chargeDecision() {
-        if (!chargeAvailable)
+        if (!chargeAvailable) {
+            if (charge.native_limit === "on")
+                return i18n("Charge-limit service is inactive. HP hard 80% limit is enabled.");
+            if (charge.native_limit === "unknown")
+                return i18n("Charge-limit service is inactive. Could not verify the HP charging limit.");
             return i18n("Charge-limit service is inactive.");
+        }
+        const nativeNote = charge.native_limit === "on"
+            ? (charge.enabled && charge.limit > 80
+                ? i18n(" HP hard 80% limit is also on and caps charging at 80%.")
+                : i18n(" HP hard 80% limit is also on."))
+            : (charge.native_limit === "unknown"
+                ? i18n(" Could not verify the HP charging limit.")
+                : "");
         if (charge.state !== "Automatic charging" && charge.state !== "Charging paused")
-            return charge.state || "";
+            return (charge.state || "") + nativeNote;
         if (!charge.enabled) {
             if (charge.native_limit === "on")
                 return i18n("HP hard 80% limit is enabled.");
@@ -159,13 +171,16 @@ ColumnLayout {
             return i18n("Custom soft limit off. HP manages charging.");
         }
         if (charge.online === false)
-            return i18n("The charge limit applies when plugged in.");
+            return i18n("The soft limit applies when plugged in.") + nativeNote;
         const resume = charge.limit - charge.hysteresis;
         if (charge.paused && charge.battery_status === "Not charging")
-            return i18n("Held by the custom soft limit at %1%. Charging resumes at %2%.", charge.limit, resume);
+            return i18n("Held by the custom soft limit at %1%. Charging resumes at %2%.", charge.limit, resume) + nativeNote;
+        if (charge.native_limit === "on" && charge.limit > 80
+                && charge.battery_status === "Not charging" && charge.capacity >= 79)
+            return i18n("Held by the HP hard 80% limit (custom soft limit is set to %1%).", charge.limit);
         if (charge.battery_status === "Charging" && charge.capacity < charge.limit)
-            return i18n("Charging toward the %1% limit.", charge.limit);
-        return i18n("Limit on. Stops at %1% and resumes at %2%.", charge.limit, resume);
+            return i18n("Charging toward the %1% limit.", charge.limit) + nativeNote;
+        return i18n("Soft limit on. Stops at %1% and resumes at %2%.", charge.limit, resume) + nativeNote;
     }
 
     function sensorName(sensor) {
@@ -309,7 +324,7 @@ ColumnLayout {
         PlasmaComponents.Button {
             Layout.fillWidth: true
             text: i18n("Edit Curves…")
-            onClicked: runner.connectSource(root.editorCommand)
+            onClicked: runner.connectSource("sh -c '\"$1\" </dev/null >/dev/null 2>&1 &' sh " + JSON.stringify(root.editorCommand))
         }
     }
 
@@ -332,8 +347,11 @@ ColumnLayout {
                 enabled: !root.pendingCommand && root.charge.native_limit !== "unknown"
                 checked: root.charge.native_limit === "on"
                 text: i18n("HP hard 80% limit")
-                onClicked: root.runRequest(root.charge.native_limit === "on"
-                                           ? "native-disable" : "native-enable", root.chargeHelper)
+                onClicked: {
+                    const currentlyOn = root.charge.native_limit === "on";
+                    checked = Qt.binding(() => root.charge.native_limit === "on");
+                    root.runRequest(currentlyOn ? "native-disable" : "native-enable", root.chargeHelper);
+                }
             }
         }
 

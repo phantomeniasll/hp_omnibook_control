@@ -18,11 +18,22 @@ except ImportError:
 
 
 from curve_control import BASE, KEYS, MAX_RPM, MIN_RPM, check_profiles, load_config, load_status, read_hp_mode
+from status_text import charge_decision, charge_summary, fan_decision
 from temperature_status import readings
-from battery_limit import STATUS as BATTERY_LIMIT_STATUS, status as battery_limit_status
+from battery_limit import status as battery_limit_status
 
 LABELS = {"auto": "Automatic", "quiet": "Quiet", "balanced": "Balanced",
           "cool": "Cool", "performance": "Performance"}
+
+
+class _PointSpinBox(QSpinBox):
+    def __init__(self, on_focus):
+        super().__init__()
+        self._on_focus = on_focus
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self._on_focus(self)
 
 
 class CurveEditor(QDialog):
@@ -76,10 +87,11 @@ class CurveEditor(QDialog):
 
         hp_row = QHBoxLayout()
         self.hp_modes = {}
+        self.active_hp_mode = None
         for key in KEYS:
             button = QPushButton(LABELS[key])
             button.setCheckable(True)
-            button.clicked.connect(lambda checked, name=key: self.command("hp-mode", name))
+            button.clicked.connect(lambda checked, name=key: self.select_hp_mode(name))
             self.hp_modes[key] = button
             hp_row.addWidget(button)
         layout.addWidget(QLabel("HP firmware modes"))
@@ -143,8 +155,23 @@ class CurveEditor(QDialog):
         self.refresh()
 
     def values(self):
-        return [[self.points.cellWidget(row, column).value() for column in range(2)]
-                for row in range(self.points.rowCount())]
+        rows = []
+        for row in range(self.points.rowCount()):
+            pair = []
+            for column in range(2):
+                field = self.points.cellWidget(row, column)
+                field.interpretText()
+                pair.append(field.value())
+            rows.append(pair)
+        return rows
+
+    def select_widget_row(self, widget):
+        for row in range(self.points.rowCount()):
+            if (self.points.cellWidget(row, 0) is widget or
+                    self.points.cellWidget(row, 1) is widget):
+                self.points.selectRow(row)
+                self.update_point_actions()
+                return
 
     def add_row(self, temperature, rpm):
         row = self.points.rowCount()
@@ -152,7 +179,7 @@ class CurveEditor(QDialog):
         for column, value, limits, step in (
             (0, temperature, (30, 82), 1), (1, rpm, (MIN_RPM, MAX_RPM), 50),
         ):
-            field = QSpinBox()
+            field = _PointSpinBox(self.select_widget_row)
             field.setRange(*limits)
             field.setSingleStep(step)
             field.setValue(value)
@@ -198,25 +225,32 @@ class CurveEditor(QDialog):
         value = load_status()
         running = bool(value)
         busy = self.process.state() != QProcess.ProcessState.NotRunning
-        has_battery_service = BATTERY_LIMIT_STATUS.is_file()
-        self.charge_controls.setVisible(has_battery_service)
-        if has_battery_service:
-            battery = battery_limit_status()
+        battery = battery_limit_status()
+        has_battery_service = battery.get("service_active") is True
+        native = battery.get("native_limit")
+        show_charge_controls = (has_battery_service or native is not None
+                                or bool(battery.get("battery_status")))
+        self.charge_controls.setVisible(show_charge_controls)
+        if show_charge_controls:
             limit, hysteresis = battery["limit"], battery["hysteresis"]
-            if not self.charge_values_loaded:
+            if has_battery_service and not self.charge_values_loaded:
                 self.charge_limit.setValue(limit)
                 self.charge_resume.setValue(limit - hysteresis)
+            self.charge_limit.setEnabled(has_battery_service and not busy)
+            self.charge_resume.setEnabled(has_battery_service and not busy)
+            self.save_charge.setEnabled(has_battery_service and not busy)
+            self.battery_limit.setEnabled(has_battery_service and not busy)
             self.battery_limit.setText("Disable Soft Limit" if battery["enabled"] else
                                        "Enable Soft Limit")
-            native = battery["native_limit"]
             self.hp_battery_limit.setVisible(native is not None)
-            self.hp_battery_limit.setEnabled(native in ("on", "off"))
+            self.hp_battery_limit.setEnabled(not busy and native in ("on", "off"))
             self.hp_battery_limit.setText({
                 "on": "HP hard 80% limit · On", "off": "HP hard 80% limit · Off",
             }.get(native, "HP hard 80% limit · Unverified"))
-            thresholds = f"Stop at {limit}%, resume at {limit - hysteresis}%"
-            self.charge_status.setText(f'{thresholds}\n{battery.get("state", "")}')
-            self.charge_controls.setEnabled(not busy)
+            lines = [charge_summary(battery), charge_decision(battery)]
+            if has_battery_service:
+                lines.append(f"Soft limit thresholds: stop at {limit}%, resume at {limit - hysteresis}%")
+            self.charge_status.setText("\n".join(lines))
         self.charge_values_loaded = has_battery_service
         for button in (self.fan_boost, self.automatic, self.save, self.apply):
             button.setEnabled(running and not busy)
@@ -230,6 +264,7 @@ class CurveEditor(QDialog):
             temperatures.append(f'{name} {sensor["temperature"]:.0f}°C')
         self.temperatures.setText("  ·  ".join(temperatures))
         hp_mode, choices = read_hp_mode()
+        self.active_hp_mode = hp_mode
         for key, button in self.hp_modes.items():
             button.setEnabled(not busy and key in choices)
             button.setChecked(key == hp_mode)
@@ -239,7 +274,13 @@ class CurveEditor(QDialog):
             return
         temperature = "—" if value["temperature"] is None else f'{value["temperature"]:.0f}°C'
         rpm = "—" if value["rpm"] is None else f'{value["rpm"]:,} RPM'
-        self.status.setText(f'{LABELS[value["profile"]]}   ·   {temperature}   ·   {rpm}\n{value["state"]}')
+        self.status.setText(f'{LABELS[value["profile"]]}   ·   {temperature}   ·   {rpm}\n{fan_decision(value)}')
+
+    def select_hp_mode(self, mode):
+        for key, button in self.hp_modes.items():
+            button.setChecked(key == self.active_hp_mode)
+        if mode != self.active_hp_mode:
+            self.command("hp-mode", mode)
 
     def command(self, operation, argument=None):
         arguments = [str(BASE / "curve_control.py"), operation]
