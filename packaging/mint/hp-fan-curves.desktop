@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=HP Fan Curves
+Comment=Edit fan curves and view temperatures
+Exec=/usr/local/lib/omnibook-fan-curves/open-curve-editor
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Settings;System;

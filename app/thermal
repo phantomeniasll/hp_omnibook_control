@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+base=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+case "${1:-}:$#" in
+    status:1) set -- panel-status ;;
+    set:2) set -- hp-mode "$2" ;;
+    curve:2) set -- select "$2" ;;
+    boost:1) ;;
+    auto:1) set -- stop-boost ;;
+    *) printf 'Use status, set MODE, curve NAME, boost, or auto.\n' >&2; exit 2 ;;
+esac
+exec "$base/curve-python" "$base/curve_control.py" "$@"

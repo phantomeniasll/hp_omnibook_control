@@ -1,0 +1,13 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Category": "System Information",
+        "Description": "Switch HP thermal modes and edit custom fan curves",
+        "Icon": "temperature-symbolic",
+        "Id": "local.omnibook.thermal",
+        "License": "GPL-2.0-only",
+        "Name": "HP Thermal Mode",
+        "Version": "1.2"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
