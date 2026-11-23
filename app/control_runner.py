@@ -4,10 +4,12 @@ import json
 import os
 import socket
 import sys
+import time
 from pathlib import Path
 
 SOCKET = Path("/run/omnibook-control.sock")
 MAX_REQUEST = 16384
+READ_TIMEOUT = 2
 OPERATIONS = {
     "fan": {"hp-mode": 1, "save": 1, "save-select": 1, "select": 1,
             "boost": 0, "stop-boost": 0},
@@ -51,19 +53,40 @@ def dispatch(command):
     main([operation, *args])
 
 
-def serve():
+def read_request(peer):
+    deadline = time.monotonic() + READ_TIMEOUT
+    data = bytearray()
+    while len(data) < MAX_REQUEST:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Timed out reading the OmniBook request.")
+        peer.settimeout(remaining)
+        chunk = peer.recv(min(4096, MAX_REQUEST - len(data)))
+        if not chunk:
+            break
+        data.extend(chunk)
+        end = data.find(b"\n")
+        if end >= 0:
+            return json.loads(data[:end])
+    raise ValueError("Invalid OmniBook control request size.")
+
+
+def serve(peer):
     try:
-        data = sys.stdin.buffer.readline(MAX_REQUEST + 1)
-        if not data.endswith(b"\n") or len(data) > MAX_REQUEST:
-            raise ValueError("Invalid OmniBook control request size.")
-        dispatch(json.loads(data))
+        dispatch(read_request(peer))
     except (OSError, ValueError, KeyError, TypeError) as error:
-        print(json.dumps({"error": str(error)}))
+        result = {"error": str(error)}
     else:
-        print(json.dumps({"error": ""}))
+        result = {"error": ""}
+    try:
+        peer.settimeout(1)
+        peer.sendall(json.dumps(result).encode() + b"\n")
+    except (TimeoutError, BrokenPipeError, ConnectionResetError):
+        pass
 
 
 if __name__ == "__main__":
     if sys.argv[1:] != ["serve"] or os.geteuid() != 0:
         sys.exit("The OmniBook control runner must be started by the system service.")
-    serve()
+    with socket.socket(fileno=os.dup(sys.stdin.fileno())) as peer:
+        serve(peer)

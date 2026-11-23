@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-from curve_control import BASE, BIN, atomic_write
+from curve_control import BASE, BIOS_MODULE_ARGS, BIN, atomic_write
 
 BATTERY = Path("/sys/class/power_supply/BAT0")
 AC = Path("/sys/class/power_supply/ADP1/online")
@@ -65,7 +65,7 @@ def driver_ready():
     module = BASE / os.uname().release / "omnibook-charge-control.ko"
     if not module.is_file():
         raise OSError("No charge control module for this kernel")
-    result = subprocess.run([BIN / "insmod", module], capture_output=True, text=True)
+    result = subprocess.run([BIN / "insmod", module, *BIOS_MODULE_ARGS], capture_output=True, text=True)
     if result.returncode:
         raise OSError(result.stderr.strip() or "The kernel rejected the charge control module")
 

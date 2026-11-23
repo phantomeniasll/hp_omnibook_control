@@ -22,7 +22,7 @@ Set `plasmaWidget = false` on other desktops. Rebuild using your normal NixOS fl
 
 List the local accounts that may change controls in `controlUsers` and sign out and back in after activation. Members can run the fan and battery controls without password prompts.
 
-With the battery service installed, use **Battery Charging** in the Plasma widget or **Battery charging** in the editor or run `hp-charge-limit enable`. Set the stop and resume percentages in the widget or editor. The CLI uses hysteresis in percentage points, for example `hp-charge-limit set 80 5`. The charge setting is off on a fresh installation. See [power management](power-management.md) for runtime and suspend behavior.
+With the battery service installed, use **Battery Charging** in the Plasma widget or **Battery charging** in the editor or run `hp-charge-limit enable`. Set the stop and resume percentages in the widget or editor. The CLI uses hysteresis in percentage points, for example `hp-charge-limit set 80 5`. The charge setting is off on a fresh installation. For explicit write testing on an unverified BIOS on board 8DA8, set `allowUntestedBios = true` and reboot so both drivers load with the configured policy. See [power management](power-management.md) for runtime and suspend behavior.
 
 This package's Plasma integration is a standalone widget. It is compatible with the stock Power & Battery widget and does not require modifying Plasma Shell or PowerDevil. The software exposes HP's separate modes if the running `hp-wmi` driver offers readable profiles. The [firmware notes](firmware.md) explain the readback issue on some kernels.
 

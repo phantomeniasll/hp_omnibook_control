@@ -4,7 +4,7 @@ A Cinnamon menu app and systemd background service for four editable fan curves.
 
 ## Check the laptop first
 
-The hardware interface was verified on an **HP OmniBook X Flip 16-ar0xxx with board 8DA8 and BIOS F.11**. Other OmniBooks may use different fan firmware. The installer checks the vendor and board. The driver also checks the firmware interface before accepting fan targets. Other BIOS versions on board 8DA8 can be tried. Report the BIOS version with any results.
+The hardware interface was verified on an **HP OmniBook X Flip 16-ar0xxx with board 8DA8 and BIOS F.11**. Other OmniBooks may use different fan firmware. The installer checks the vendor and board. The driver also checks the firmware interface before accepting fan targets. Other BIOS versions on board 8DA8 default to read-only access. Report the BIOS version with any results.
 
 Open a terminal in the extracted folder and run:
 
@@ -29,7 +29,7 @@ Open **HP Fan Curves** from the Cinnamon application menu. Right-click the menu 
 - Choose **Quiet**, **Balanced**, **Cool**, or **Performance** in the curve editor.
 - Edit the CPU temperature and RPM points, then select **Save and Apply**. **Save Curves** stores edits without changing the selected curve.
 - Choose **Use Automatic** to return the fan to HP firmware control. Automatic is the initial setting after a fresh install.
-- **Fan Boost** requests 4,500 RPM for up to 30 seconds, then returns to the selected curve or Automatic.
+- **Fan Boost** requests 4,500 RPM for up to 30 seconds, then gives HP at least eight seconds of control before allowing another boost or resuming the selected curve.
 - The separate **HP firmware modes** buttons are enabled when the running HP driver exposes a readable profile. Older kernels may leave them disabled. The installer does not patch or replace the stock HP driver.
 
 The fan returns to firmware control below the curve's first temperature, when HP already calls for at least as much cooling, during a safety-temperature cutoff, or if the service stops renewing the override. Curves use target points from 3,000 to 4,500 RPM in 50 RPM steps. Temperatures must increase strictly between 30°C and 82°C.
@@ -55,3 +55,7 @@ Removal stops the service and unloads the driver. Saved curves remain at `/var/l
 When the charge module was built alongside the fan module, the installer also starts the charge-limit service. Use **Battery charging** in the editor or run `hp-charge-limit set 80 5` and `hp-charge-limit enable`. On Secure Boot systems the charge module must be signed separately before it can load.
 
 See [power management](power-management.md) for HP Battery Care, Linux charge thresholds, and the separate research probe.
+
+For a fan-only upgrade, pass `--install-built FILE --without-charge`. This removes the old charge service, launcher, and modules and retains the charge preferences.
+
+For explicit firmware write testing on another BIOS on board 8DA8, add a systemd drop-in to `omnibook-fan-curves.service`, `omnibook-charge-limit.service` if installed, and `omnibook-control@.service` with `Environment=OMNIBOOK_ALLOW_UNTESTED_BIOS=1` under `[Service]`. Reboot so any previously loaded modules use the new opt-in policy.

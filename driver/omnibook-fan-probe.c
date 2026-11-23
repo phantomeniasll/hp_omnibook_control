@@ -9,7 +9,6 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/suspend.h>
-#include <linux/thermal.h>
 #include <linux/workqueue.h>
 
 #include "omnibook-acpi.h"
@@ -20,22 +19,30 @@
 #define FAN_OVERRIDE BIT(4)
 #define RPM_PER_UNIT 50
 #define REQUESTED_RPM 4500
-#define BOOST_DURATION_SECONDS 30
-#define BOOST_ACPI_LIMIT_MC 75000
+#define MAX_OWNERSHIP (30 * HZ)
+#define FIRMWARE_INTERVAL (8 * HZ)
+#define ACPI_TEMP_MIN 2732
+#define ACPI_TEMP_LIMIT 3482
 #define MIN_CURVE_RPM 3000
 #define CURVE_LEASE_SECONDS 6
 
 static acpi_handle pci0;
-static bool boost;
+static bool allow_untested_bios;
+static bool writes_allowed;
+static bool ready;
 static bool curve;
 static bool active;
+static bool owns_override;
+static bool cooling_off;
 static bool suspended;
 static int active_target;
 static int firmware_floor;
-static unsigned long boost_deadline;
+static unsigned long lease_until;
+static unsigned long ownership_until;
+static unsigned long firmware_until;
 static DEFINE_MUTEX(fan_lock);
 
-module_param(boost, bool, 0400);
+module_param(allow_untested_bios, bool, 0400);
 module_param(curve, bool, 0444);
 module_param(active, bool, 0444);
 
@@ -84,56 +91,72 @@ static int set_override(bool enabled)
 		? -EIO : 0;
 }
 
-static int restore_automatic(void)
+static int clear_override(void)
 {
 	int attempt, control;
 
 	for (attempt = 0; attempt < 3; attempt++) {
 		set_override(false);
 		control = mailbox_read(FAN_CONTROL);
-		if (control >= 0 && !(control & FAN_OVERRIDE))
+		if (control >= 0 && control != U8_MAX && !(control & FAN_OVERRIDE))
 			return 0;
 		msleep(100);
 	}
 
-	pr_err("Unable to verify automatic control. Reboot to reset the controller.\n");
+	pr_warn_ratelimited("Could not verify automatic fan control, retrying\n");
 	return -EIO;
 }
 
 static bool safe_to_boost(void)
 {
-	struct thermal_zone_device *zone = thermal_zone_get_zone_by_name("acpitz");
-	int temperature;
+	unsigned long long temperature;
 
-	return !IS_ERR_OR_NULL(zone) && !thermal_zone_get_temp(zone, &temperature) &&
-	       temperature < BOOST_ACPI_LIMIT_MC;
+	return ACPI_SUCCESS(acpi_evaluate_integer(NULL, "\\_TZ_.TZS0._TMP", NULL, &temperature)) &&
+	       temperature >= ACPI_TEMP_MIN && temperature < ACPI_TEMP_LIMIT;
 }
 
-static void monitor_boost(struct work_struct *work);
-static DECLARE_DELAYED_WORK(boost_work, monitor_boost);
+static void monitor_override(struct work_struct *work);
+static DECLARE_DELAYED_WORK(override_work, monitor_override);
 
-static void monitor_boost(struct work_struct *work)
+/* Hold a module reference from the first attempted write through verified restore. */
+static int restore_fan(void)
+{
+	if (!owns_override)
+		return 0;
+	WRITE_ONCE(active, false);
+	if (clear_override()) {
+		mod_delayed_work(system_wq, &override_work, HZ);
+		return -EIO;
+	}
+	cooling_off = true;
+	firmware_until = jiffies + FIRMWARE_INTERVAL;
+	owns_override = false;
+	pr_info("Automatic fan control restored\n");
+	module_put(THIS_MODULE);
+	return 0;
+}
+
+static void monitor_override(struct work_struct *work)
 {
 	int tachometer, control;
 
 	mutex_lock(&fan_lock);
-	if (!active)
+	if (!ready || !owns_override)
 		goto out;
+
+	if (!active || time_after_eq(jiffies, lease_until) ||
+	    time_after_eq(jiffies, ownership_until) || !safe_to_boost())
+		goto restore;
 	tachometer = mailbox_read(FAN_TACHOMETER);
 	control = mailbox_read(FAN_CONTROL);
-
-	if (time_after_eq(jiffies, boost_deadline) || !safe_to_boost() ||
-	    tachometer <= 0 || tachometer == U8_MAX ||
-	    (!curve && tachometer * RPM_PER_UNIT > active_target) ||
-	    control < 0 || !(control & FAN_OVERRIDE) ||
-	    mailbox_read(FAN_TARGET) != active_target / RPM_PER_UNIT) {
-		if (!restore_automatic()) {
-			WRITE_ONCE(active, false);
-			pr_info("Automatic fan control restored\n");
-			goto out;
-		}
-	}
-	schedule_delayed_work(&boost_work, HZ);
+	if (tachometer <= 0 || tachometer == U8_MAX ||
+	    control < 0 || control == U8_MAX || !(control & FAN_OVERRIDE) ||
+	    mailbox_read(FAN_TARGET) != active_target / RPM_PER_UNIT)
+		goto restore;
+	mod_delayed_work(system_wq, &override_work, HZ);
+	goto out;
+restore:
+	restore_fan();
 out:
 	mutex_unlock(&fan_lock);
 }
@@ -145,21 +168,8 @@ static int cancel_boost(const char *value, const struct kernel_param *parameter)
 
 	if (kstrtobool(value, &requested) || !requested)
 		return -EINVAL;
-	cancel_delayed_work_sync(&boost_work);
 	mutex_lock(&fan_lock);
-	if (!active) {
-		result = 0;
-		goto out;
-	}
-	result = restore_automatic();
-	if (result) {
-		boost_deadline = jiffies;
-		schedule_delayed_work(&boost_work, HZ);
-		goto out;
-	}
-	WRITE_ONCE(active, false);
-	pr_info("Automatic fan control restored\n");
-out:
+	result = ready ? restore_fan() : -ENODEV;
 	mutex_unlock(&fan_lock);
 	return result;
 }
@@ -169,61 +179,85 @@ module_param_cb(cancel, &cancel_boost_ops, NULL, 0200);
 
 static int set_curve_target(const char *value, const struct kernel_param *parameter)
 {
-	int rpm, control, tachometer, current_target, result = -EIO;
+	int rpm, control, tachometer, current_target, result;
 
 	if (kstrtoint(value, 10, &rpm) || rpm < MIN_CURVE_RPM ||
 	    rpm > REQUESTED_RPM || rpm % RPM_PER_UNIT)
 		return -EINVAL;
 	mutex_lock(&fan_lock);
-	if (!pci0 || !curve || suspended || !safe_to_boost()) {
-		result = -EBUSY;
+	result = -ENODEV;
+	if (!ready)
+		goto out;
+	result = -EOPNOTSUPP;
+	if (!writes_allowed)
+		goto out;
+	result = -EBUSY;
+	if (suspended)
+		goto out;
+	if (!safe_to_boost()) {
+		restore_fan();
 		goto out;
 	}
+	if (owns_override && (!active || time_after_eq(jiffies, ownership_until) ||
+			      time_after_eq(jiffies, lease_until))) {
+		restore_fan();
+		result = -EAGAIN;
+		goto out;
+	}
+	if (cooling_off && time_before(jiffies, firmware_until)) {
+		result = -EAGAIN;
+		goto out;
+	}
+	cooling_off = false;
+
 	control = mailbox_read(FAN_CONTROL);
 	tachometer = mailbox_read(FAN_TACHOMETER);
 	current_target = mailbox_read(FAN_TARGET);
+	result = -EIO;
 	if (control < 0 || control == U8_MAX || tachometer < 0 || tachometer == U8_MAX ||
 	    current_target < 0 || current_target == U8_MAX)
-		goto out;
-	if (!active) {
+		goto restore;
+	if (!owns_override) {
 		if (control & FAN_OVERRIDE) {
 			result = -EBUSY;
 			goto out;
 		}
 		firmware_floor = max(tachometer, current_target) * RPM_PER_UNIT;
 	}
-	if (rpm <= firmware_floor || (active && !(control & FAN_OVERRIDE))) {
-		result = -EAGAIN;
-		goto out;
-	}
-
-	if (!active && set_override(true))
+	if (rpm <= firmware_floor) {
+		result = -EALREADY;
 		goto restore;
-	if ((current_target != rpm / RPM_PER_UNIT || !active) &&
+	}
+	if (owns_override && !(control & FAN_OVERRIDE))
+		goto restore;
+
+	if (!owns_override) {
+		if (!try_module_get(THIS_MODULE))
+			goto out;
+		owns_override = true;
+		ownership_until = jiffies + MAX_OWNERSHIP;
+		if (set_override(true))
+			goto restore;
+	}
+	if (current_target != rpm / RPM_PER_UNIT &&
 	    mailbox_write(FAN_TARGET, rpm / RPM_PER_UNIT))
 		goto restore;
 	control = mailbox_read(FAN_CONTROL);
-	if (control < 0 || !(control & FAN_OVERRIDE) ||
+	if (control < 0 || control == U8_MAX || !(control & FAN_OVERRIDE) ||
 	    mailbox_read(FAN_TARGET) != rpm / RPM_PER_UNIT)
 		goto restore;
 
 	active_target = rpm;
-	boost_deadline = jiffies + CURVE_LEASE_SECONDS * HZ;
+	lease_until = jiffies + CURVE_LEASE_SECONDS * HZ;
 	if (!active) {
 		WRITE_ONCE(active, true);
-		schedule_delayed_work(&boost_work, HZ);
+		mod_delayed_work(system_wq, &override_work, HZ);
 	}
 	result = 0;
 	goto out;
 
 restore:
-	if (!restore_automatic()) {
-		WRITE_ONCE(active, false);
-	} else {
-		WRITE_ONCE(active, true);
-		boost_deadline = jiffies;
-		schedule_delayed_work(&boost_work, HZ);
-	}
+	restore_fan();
 out:
 	mutex_unlock(&fan_lock);
 	return result;
@@ -234,26 +268,26 @@ module_param_cb(target, &curve_target_ops, NULL, 0200);
 
 static int pause_for_sleep(struct notifier_block *notifier, unsigned long event, void *data)
 {
-	if (event == PM_SUSPEND_PREPARE || event == PM_HIBERNATION_PREPARE) {
-		mutex_lock(&fan_lock);
+	int result = 0;
+
+	mutex_lock(&fan_lock);
+	if (ready && (event == PM_SUSPEND_PREPARE || event == PM_HIBERNATION_PREPARE)) {
 		suspended = true;
-		mutex_unlock(&fan_lock);
-		if (cancel_boost("1", NULL))
-			return NOTIFY_BAD;
+		result = restore_fan();
+		if (result)
+			suspended = false;
 	} else if (event == PM_POST_SUSPEND || event == PM_POST_HIBERNATION) {
-		mutex_lock(&fan_lock);
 		suspended = false;
-		mutex_unlock(&fan_lock);
 	}
-	return NOTIFY_OK;
+	mutex_unlock(&fan_lock);
+	return result ? NOTIFY_BAD : NOTIFY_OK;
 }
 
 static struct notifier_block fan_pm_notifier = { .notifier_call = pause_for_sleep };
 
 static int __init omnibook_fan_probe_init(void)
 {
-	int sample, tachometer, previous_target, control, baseline, target;
-	int result = -EIO;
+	int sample, control, target, result;
 
 	if (!dmi_match(DMI_SYS_VENDOR, "HP") ||
 	    !dmi_match(DMI_BOARD_NAME, "8DA8"))
@@ -262,106 +296,49 @@ static int __init omnibook_fan_probe_init(void)
 	if (ACPI_FAILURE(acpi_get_handle(NULL, "\\_SB.PCI0", &pci0)) ||
 	    !omnibook_has_method(pci0, "RDMB", 1) ||
 	    !omnibook_has_method(pci0, "WRMB", 2) ||
-	    !omnibook_has_method(pci0, "AOMB", 3)) {
-		pr_info("Expected ACPI fan mailbox methods were not found\n");
+	    !omnibook_has_method(pci0, "AOMB", 3) ||
+	    !omnibook_has_method(NULL, "\\_TZ_.TZS0._TMP", 0)) {
+		pr_info("Expected ACPI fan or temperature methods were not found\n");
 		return -ENODEV;
 	}
 
 	control = mailbox_read(FAN_CONTROL);
-	previous_target = mailbox_read(FAN_TARGET);
-	tachometer = mailbox_read(FAN_TACHOMETER);
-	if (control < 0 || control == U8_MAX ||
-	    previous_target < 0 || previous_target == U8_MAX ||
-	    tachometer < 0 || tachometer == U8_MAX) {
+	target = mailbox_read(FAN_TARGET);
+	sample = mailbox_read(FAN_TACHOMETER);
+	if (control < 0 || control == U8_MAX || target < 0 || target == U8_MAX ||
+	    sample < 0 || sample == U8_MAX) {
 		pr_info("Fan mailbox did not return valid readings\n");
 		return -ENODEV;
 	}
-	if (!dmi_match(DMI_BIOS_VERSION, "F.11"))
-		pr_info("BIOS %s passed the read-only fan checks\n",
-			dmi_get_system_info(DMI_BIOS_VERSION) ?: "unknown");
 
-	if (curve)
-		return boost ? -EINVAL : register_pm_notifier(&fan_pm_notifier);
-
-	if (boost && !safe_to_boost()) {
-		pr_info("Skipping boost: ACPI temperature is high or unavailable\n");
-		return -EBUSY;
+	writes_allowed = curve && (dmi_match(DMI_BIOS_VERSION, "F.11") || allow_untested_bios);
+	pr_info("Fan firmware access: %s; tachometer %d RPM, target %d RPM\n",
+		writes_allowed ? "curve control" : "read-only",
+		sample * RPM_PER_UNIT, target * RPM_PER_UNIT);
+	result = register_pm_notifier(&fan_pm_notifier);
+	if (!result) {
+		mutex_lock(&fan_lock);
+		ready = true;
+		mutex_unlock(&fan_lock);
 	}
-
-	if (!tachometer)
-		return -EIO;
-	baseline = tachometer * RPM_PER_UNIT;
-	pr_info("Automatic RPM before probe: %d, control 0x%02x, target byte 0x%02x\n",
-		baseline, control, previous_target);
-	if ((control & FAN_OVERRIDE) || baseline + 300 > REQUESTED_RPM) {
-		pr_info("Skipping probe: an override is already active or RPM is already near the test target\n");
-		return -EBUSY;
-	}
-
-	if (mailbox_write(FAN_TARGET, REQUESTED_RPM / RPM_PER_UNIT)) {
-		pr_info("Could not stage the requested target\n");
-		goto restore;
-	}
-	target = mailbox_read(FAN_TARGET);
-	pr_info("Target readback while still in automatic mode: %d (requested %d)\n",
-		target, REQUESTED_RPM / RPM_PER_UNIT);
-	if (set_override(true)) {
-		pr_info("ACPI could not enable the fan override\n");
-		goto restore;
-	}
-	if (mailbox_write(FAN_TARGET, REQUESTED_RPM / RPM_PER_UNIT)) {
-		pr_info("ACPI could not write the fan target after enabling the override\n");
-		goto restore;
-	}
-	control = mailbox_read(FAN_CONTROL);
-	target = mailbox_read(FAN_TARGET);
-	if (control < 0 || !(control & FAN_OVERRIDE) ||
-	    target != REQUESTED_RPM / RPM_PER_UNIT) {
-		pr_info("Controller did not confirm the request: control %d, target %d, expected %d\n",
-			control, target, REQUESTED_RPM / RPM_PER_UNIT);
-		goto restore;
-	}
-
-	if (boost) {
-		active_target = REQUESTED_RPM;
-		WRITE_ONCE(active, true);
-		boost_deadline = jiffies + BOOST_DURATION_SECONDS * HZ;
-		schedule_delayed_work(&boost_work, HZ);
-		pr_info("Fan boost requested: %d RPM for up to %d seconds\n",
-			REQUESTED_RPM, BOOST_DURATION_SECONDS);
-		return 0;
-	}
-
-	for (sample = 1; sample <= 5; sample++) {
-		msleep(1000);
-		tachometer = mailbox_read(FAN_TACHOMETER);
-		if (tachometer <= 0 || tachometer == U8_MAX)
-			goto restore;
-		pr_info("RPM after %d seconds: %d (target %d)\n",
-			sample, tachometer * RPM_PER_UNIT, REQUESTED_RPM);
-	}
-	result = 0;
-
-restore:
-	if (restore_automatic())
-		return -EIO;
-	pr_info("Automatic fan control restored\n");
 	return result;
 }
 
 static void __exit omnibook_fan_probe_exit(void)
 {
-	if (curve)
-		unregister_pm_notifier(&fan_pm_notifier);
-	cancel_delayed_work_sync(&boost_work);
-	if (READ_ONCE(active) && !restore_automatic()) {
-		WRITE_ONCE(active, false);
-		pr_info("Automatic fan control restored\n");
-	}
+	mutex_lock(&fan_lock);
+	ready = false;
+	mutex_unlock(&fan_lock);
+	unregister_pm_notifier(&fan_pm_notifier);
+	cancel_delayed_work_sync(&override_work);
+	mutex_lock(&fan_lock);
+	/* Normal removal is impossible until the ownership reference is released. */
+	WARN_ON_ONCE(owns_override);
+	mutex_unlock(&fan_lock);
 }
 
 module_init(omnibook_fan_probe_init);
 module_exit(omnibook_fan_probe_exit);
 
-MODULE_DESCRIPTION("Timed HP OmniBook 8DA8 fan boost and hardware probe");
+MODULE_DESCRIPTION("HP OmniBook 8DA8 fan control with bounded firmware ownership");
 MODULE_LICENSE("GPL");

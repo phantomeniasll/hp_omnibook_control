@@ -1,6 +1,6 @@
 # Firmware evidence
 
-The implementation is scoped to HP board 8DA8. BIOS F.11 was tested on the laptop. The driver checks for the expected ACPI method signatures and valid fan or charge readback before accepting commands on other BIOS versions. It was derived by examining the DSDT and SSDTs from that board with [ACPICA iASL](https://github.com/acpica/acpica). The AML dump is machine-specific. This repository contains source and notes.
+The implementation is scoped to HP board 8DA8. BIOS F.11 was tested on the laptop. The driver checks the expected ACPI method signatures and readbacks at load time. Other BIOS versions default to read-only access. Administrators can explicitly enable writes for testing on the same board. It was derived by examining the DSDT and SSDTs from that board with [ACPICA iASL](https://github.com/acpica/acpica). The AML dump is machine-specific. This repository contains source and notes.
 
 HP's packaged F.11 and F.13 images for board 8DA8 contain byte-for-byte identical DSDT, HP WMI, and UCSI ACPI tables. Those tables cover the fan mailbox and the battery pause and resume methods. F.13 still needs a live fan and charging test because the embedded controller's behavior can differ. [F.11 package metadata](https://ftp.hp.com/pub/softpaq/sp165501-166000/sp165708.cva) · [F.13 package metadata](https://ftp.hp.com/pub/softpaq/sp172501-173000/sp172874.cva)
 
@@ -23,4 +23,6 @@ The profile occupies the low byte of the HP WMI reply on the board we examined. 
 
 ## Operating limits
 
-The controller leaves the fan in firmware control below the first temperature point or when its requested speed is no higher than the firmware's initial fan target. An automatic check periodically gives the firmware time to reevaluate its target. The driver limits requests to 4,500 RPM and releases its override on loss of the userspace lease or when the ACPI temperature safety check fails. Linux's normal thermal throttling and firmware recovery mechanisms still apply.
+The controller leaves the fan in firmware control below the first temperature point or when its requested speed is no higher than the firmware's initial fan target. An automatic check periodically gives the firmware time to reevaluate its target. The driver limits requests to 4,500 RPM and keeps the override for at most 30 seconds. HP then controls the fan for at least eight seconds before the driver resamples its target. The driver also releases the override if userspace stops renewing the six-second lease, if tachometer or target readback fails, or if the ACPI temperature is unavailable or reaches the cutoff. Linux's normal thermal throttling and firmware recovery mechanisms still apply.
+
+Both control modules hold a reference while they own a firmware override and retry restoration until it is verified. Normal module removal is blocked until that reference is released. Allow the watchdog to recover or reboot if firmware stops responding. Forced removal bypasses this protection.

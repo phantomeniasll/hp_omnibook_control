@@ -19,12 +19,16 @@
 
 static DEFINE_MUTEX(charge_lock);
 static bool ready;
+static bool writes_allowed;
+static bool allow_untested_bios;
 static bool owned;
 static bool inhibited;
 static bool suspended;
 static unsigned long lease_until;
 static void expire_inhibit(struct work_struct *work);
 static DECLARE_DELAYED_WORK(expiry, expire_inhibit);
+
+module_param(allow_untested_bios, bool, 0400);
 
 static int sbco(unsigned int mode)
 {
@@ -76,15 +80,21 @@ static int restore_charge(void)
 
 	if (!owned)
 		return 0;
+	lease_until = jiffies;
 	if (sbco(CHARGE_AUTO))
-		return -EIO;
+		goto retry;
 	mode = gbco();
 	if (mode != 0 && mode != 1)
-		return -EIO;
+		goto retry;
 	owned = false;
 	inhibited = false;
 	pr_info("Automatic charging restored\n");
+	module_put(THIS_MODULE);
 	return 0;
+retry:
+	pr_warn_ratelimited("Could not restore automatic charging, retrying\n");
+	mod_delayed_work(system_wq, &expiry, 5 * HZ);
+	return -EIO;
 }
 
 static void expire_inhibit(struct work_struct *work)
@@ -92,13 +102,14 @@ static void expire_inhibit(struct work_struct *work)
 	unsigned long now;
 
 	mutex_lock(&charge_lock);
+	if (!ready || !owned)
+		goto out;
 	now = jiffies;
-	if (owned && time_before(now, lease_until)) {
+	if (time_before(now, lease_until))
 		mod_delayed_work(system_wq, &expiry, lease_until - now);
-	} else if (restore_charge()) {
-		pr_warn_ratelimited("Could not restore automatic charging, retrying\n");
-		mod_delayed_work(system_wq, &expiry, 5 * HZ);
-	}
+	else
+		restore_charge();
+out:
 	mutex_unlock(&charge_lock);
 }
 
@@ -116,21 +127,23 @@ static int charge_set(const char *value, const struct kernel_param *parameter)
 	}
 	if (!requested) {
 		result = restore_charge();
-		if (result) {
-			lease_until = jiffies;
-			mod_delayed_work(system_wq, &expiry, 5 * HZ);
-		}
 		goto out;
 	}
+	result = -EOPNOTSUPP;
+	if (!writes_allowed)
+		goto out;
 	result = -EBUSY;
 	if (suspended)
 		goto out;
-	if (inhibited)
-		goto renew;
-	if (owned)
+	if (owned) {
+		if (inhibited && time_before(jiffies, lease_until))
+			goto renew;
 		goto out;
+	}
 	mode = gbco();
 	if (mode != 0 && mode != 1)
+		goto out;
+	if (!try_module_get(THIS_MODULE))
 		goto out;
 	owned = true;
 	if (!sbco(CHARGE_INHIBIT)) {
@@ -141,10 +154,7 @@ static int charge_set(const char *value, const struct kernel_param *parameter)
 			goto renew;
 		}
 	}
-	if (restore_charge()) {
-		lease_until = jiffies;
-		mod_delayed_work(system_wq, &expiry, 5 * HZ);
-	}
+	restore_charge();
 	result = -EIO;
 	goto out;
 renew:
@@ -161,7 +171,7 @@ static int charge_get(char *buffer, const struct kernel_param *parameter)
 	int length;
 
 	mutex_lock(&charge_lock);
-	length = sysfs_emit(buffer, "%c\n", inhibited ? 'Y' : 'N');
+	length = ready ? sysfs_emit(buffer, "%c\n", inhibited ? 'Y' : 'N') : -ENODEV;
 	mutex_unlock(&charge_lock);
 	return length;
 }
@@ -177,6 +187,8 @@ static int suspend_charge(struct notifier_block *block, unsigned long event, voi
 	int result = 0;
 
 	mutex_lock(&charge_lock);
+	if (!ready)
+		goto out;
 	switch (event) {
 	case PM_SUSPEND_PREPARE:
 	case PM_HIBERNATION_PREPARE:
@@ -190,6 +202,7 @@ static int suspend_charge(struct notifier_block *block, unsigned long event, voi
 		suspended = false;
 		break;
 	}
+out:
 	mutex_unlock(&charge_lock);
 	return result ? NOTIFY_BAD : NOTIFY_OK;
 }
@@ -213,9 +226,8 @@ static int __init charge_init(void)
 		pr_info("ACPI did not return a recognized charging mode\n");
 		return -ENODEV;
 	}
-	if (!dmi_match(DMI_BIOS_VERSION, "F.11"))
-		pr_info("BIOS %s passed the read-only charging checks\n",
-			dmi_get_system_info(DMI_BIOS_VERSION) ?: "unknown");
+	writes_allowed = dmi_match(DMI_BIOS_VERSION, "F.11") || allow_untested_bios;
+	pr_info("Battery firmware access: %s\n", writes_allowed ? "pause control" : "read-only");
 
 	result = register_pm_notifier(&sleep_notifier);
 	if (!result) {
@@ -228,10 +240,15 @@ static int __init charge_init(void)
 
 static void __exit charge_exit(void)
 {
+	mutex_lock(&charge_lock);
+	ready = false;
+	mutex_unlock(&charge_lock);
 	unregister_pm_notifier(&sleep_notifier);
 	cancel_delayed_work_sync(&expiry);
-	if (restore_charge())
-		pr_err("Unable to restore automatic charging during driver removal\n");
+	mutex_lock(&charge_lock);
+	/* Normal removal is impossible until the ownership reference is released. */
+	WARN_ON_ONCE(owned);
+	mutex_unlock(&charge_lock);
 }
 
 module_init(charge_init);

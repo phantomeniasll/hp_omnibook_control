@@ -14,15 +14,32 @@ check_board() {
     fi
 }
 
+install_built() {
+    fan=$(realpath "$1")
+    charge=$(dirname -- "$fan")/omnibook-charge-control.ko
+    fan_hash=$(sha256sum "$fan" | cut -d ' ' -f1)
+    if [ "${2:-}" = --without-charge ]; then
+        printf 'Installing fan control only.\n'
+        sudo /bin/sh "$base/packaging/mint/install-system.sh" "$fan" "$fan_hash" --without-charge
+    elif [ -f "$charge" ]; then
+        charge_hash=$(sha256sum "$charge" | cut -d ' ' -f1)
+        sudo /bin/sh "$base/packaging/mint/install-system.sh" "$fan" "$fan_hash" "$charge" "$charge_hash"
+    else
+        printf 'Charge module missing. Use --install-built FILE --without-charge for a fan-only installation.\n' >&2
+        return 1
+    fi
+}
+
 check_board
 case "${1:-}" in
     --check) [ "$#" -eq 1 ]; exit ;;
     --install-built)
-        [ "$#" -eq 2 ]
-        exec sudo /bin/sh "$base/packaging/mint/install-system.sh" "$(realpath "$2")"
+        [ "$#" -eq 2 ] || { [ "$#" -eq 3 ] && [ "$3" = --without-charge ]; }
+        install_built "$2" "${3:-}"
+        exit
         ;;
     ""|--build-only) [ "$#" -le 1 ] ;;
-    *) printf 'Usage: %s [--check | --build-only | --install-built FILE]\n' "$0" >&2; exit 2 ;;
+    *) printf 'Usage: %s [--check | --build-only | --install-built FILE [--without-charge]]\n' "$0" >&2; exit 2 ;;
 esac
 if [ "$(id -u)" -eq 0 ]; then
     printf 'Run this script as your regular user. It asks for sudo when installing.\n' >&2
@@ -37,5 +54,5 @@ module="$base/driver/omnibook-fan-probe.ko"
 if [ "${1:-}" = "--build-only" ]; then
     printf '%s\n' "$module"
 else
-    sudo /bin/sh "$base/packaging/mint/install-system.sh" "$module"
+    install_built "$module"
 fi
