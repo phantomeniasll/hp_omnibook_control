@@ -26,7 +26,7 @@ sh ./packaging/mint/install.sh
 
 Use the launcher from a verified release. From a Git checkout, set `OMNIBOOK_TRUSTED_COMMIT` to the full hash of a revision you have reviewed instead of setting the two archive variables. The launcher builds modules as your user, then requests administrator access. It verifies the privileged payload checksum in a private root-owned staging directory, stages and tests the modules, and retains the previous app, units, and enablement links until the new services start successfully. It grants the installing account access through the `omnibook-control` group. Sign out and back in once to activate the membership. The installed controls then work without password prompts. Keep the extracted folder for future kernel updates.
 
-Open **HP Fan Curves** from the Cinnamon application menu. Right-click the menu result and choose **Add to panel** if you want quick access. The app can be closed while the service runs.
+Open **HP Fan Curves** from the Cinnamon application menu. Right-click the menu result and choose **Add to panel** if you want a launcher shortcut, or open Cinnamon **Applets** settings and add the **HP Thermal & Battery** panel applet (`omnibook-thermal@omnibook`) for quick mode/curve switches, Fan Boost, live temperatures, and battery limit status. The desktop app can be closed while the background services run.
 
 - Choose **Quiet**, **Balanced**, **Cool**, or **Performance** in the curve editor.
 - Edit the CPU temperature and RPM points, then select **Save and Apply**. **Save Curves** stores edits without changing the selected curve.
@@ -54,7 +54,7 @@ Removal stops the service and unloads the driver. Saved curves remain at `/var/l
 
 ## Battery charging
 
-When the charge module was built alongside the fan module, the installer also starts the charge-limit service. Use **Battery charging** in the editor or run `hp-charge-limit set 80 5` and `hp-charge-limit enable`. On Secure Boot systems the charge module must be signed separately before it can load.
+When the charge module was built alongside the fan module, the installer also starts the charge-limit service. Use **Battery charging** in the editor, the **HP Thermal & Battery** Cinnamon panel applet, or the CLI (`hp-charge-limit set 80 5`, `hp-charge-limit enable`, `hp-charge-limit native-enable`). When supported on board 8DA8, the **HP hard 80% limit** (`Battery Health Manager`) is exposed alongside the **Custom soft limit**, and both the editor and panel applet display the live charging state and which limit is holding charging. On Secure Boot systems the charge module must be signed separately before it can load.
 
 See [power management](power-management.md) for HP Battery Care, Linux charge thresholds, and the separate research probe.
 
