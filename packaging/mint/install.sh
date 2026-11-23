@@ -18,7 +18,7 @@ install_release() {
     if [ -n "${OMNIBOOK_RELEASE_ARCHIVE:-}" ] || [ -n "${OMNIBOOK_RELEASE_SHA256:-}" ]; then
         [ -n "${OMNIBOOK_RELEASE_ARCHIVE:-}" ] && [ -n "${OMNIBOOK_RELEASE_SHA256:-}" ]
         archive=$(realpath "$OMNIBOOK_RELEASE_ARCHIVE")
-        digest=$OMNIBOOK_RELEASE_SHA256
+        digest=$(printf '%s' "$OMNIBOOK_RELEASE_SHA256" | tr 'A-F' 'a-f')
     elif [ -n "${OMNIBOOK_TRUSTED_COMMIT:-}" ]; then
         commit=$OMNIBOOK_TRUSTED_COMMIT
         case "$commit" in *[!a-f0-9]*) return 1 ;; esac
@@ -44,12 +44,22 @@ install_release() {
         cat > "$stage/release.tar"
         actual=$(sha256sum "$stage/release.tar" | cut -d " " -f1)
         [ "$actual" = "$1" ] || { printf "Release checksum mismatch.\n" >&2; exit 1; }
-        mkdir "$stage/source"
-        /usr/bin/python3 - "$stage/release.tar" "$stage/source" <<PY
+        mkdir "$stage/extract"
+        /usr/bin/python3 - "$stage/release.tar" "$stage/extract" "$stage/source" <<PY
+from pathlib import Path
+import shutil
 import sys
 import tarfile
-with tarfile.open(sys.argv[1], "r:*") as release:
-    release.extractall(sys.argv[2], filter="data")
+
+archive_path, extract_dir, source_dir = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+with tarfile.open(archive_path, "r:*") as release:
+    release.extractall(extract_dir, filter="data")
+target = extract_dir
+if not (target / "packaging/mint/install-system.sh").is_file():
+    entries = list(extract_dir.iterdir())
+    if len(entries) == 1 and entries[0].is_dir():
+        target = entries[0]
+shutil.move(str(target), str(source_dir))
 PY
         shift
         /bin/sh "$stage/source/packaging/mint/install-system.sh" "$@"
@@ -100,7 +110,7 @@ make -C "$headers" M="$base/driver" modules
 module="$base/driver/omnibook-fan-probe.ko"
 chmod 0644 "$module" "$base/driver/omnibook-charge-control.ko"
 if [ "${1:-}" = "--build-only" ]; then
-    printf '%s\n' "$module"
+    printf '%s\n%s\n' "$module" "$base/driver/omnibook-charge-control.ko"
 else
     install_built "$module"
 fi

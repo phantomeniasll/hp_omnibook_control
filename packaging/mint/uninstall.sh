@@ -15,11 +15,24 @@ fi
 if [ -f "/etc/systemd/system/$battery_service" ]; then
     systemctl disable --now "$battery_service"
 fi
+if [ -r /sys/module/omnibook_fan_probe/parameters/handoff ]; then
+    for attempt in 1 2 3 4 5; do
+        if [ "$(cat /sys/module/omnibook_fan_probe/parameters/handoff)" != recovering ]; then break; fi
+        sleep 1
+    done
+fi
+unload_failed=false
 if [ -d /sys/module/omnibook_fan_probe ]; then
-    rmmod omnibook_fan_probe
+    if ! rmmod omnibook_fan_probe; then
+        printf 'Warning: could not unload omnibook_fan_probe (still busy); reboot to clear it.\n' >&2
+        unload_failed=true
+    fi
 fi
 if [ -d /sys/module/omnibook_charge_control ]; then
-    rmmod omnibook_charge_control
+    if ! rmmod omnibook_charge_control; then
+        printf 'Warning: could not unload omnibook_charge_control (still busy); reboot to clear it.\n' >&2
+        unload_failed=true
+    fi
 fi
 rm -f "/etc/systemd/system/$service" "/etc/systemd/system/$battery_service" \
     "/etc/systemd/system/$socket" /etc/systemd/system/omnibook-control.service \
@@ -32,4 +45,7 @@ if [ -d /usr/share/cinnamon/applets/omnibook-thermal@omnibook ]; then
     rm -r /usr/share/cinnamon/applets/omnibook-thermal@omnibook
 fi
 systemctl daemon-reload
-printf 'Removed the service and app. Saved curves are retained in /var/lib/omnibook-fan-curves.\n'
+printf 'Removed the services, app, and panel applet. Saved preferences are retained in /var/lib/omnibook-fan-curves and /var/lib/omnibook-charge-limit.\n'
+if "$unload_failed"; then
+    exit 1
+fi

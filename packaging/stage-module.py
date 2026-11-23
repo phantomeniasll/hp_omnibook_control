@@ -13,13 +13,18 @@ def stage(source, destination, uid, expected):
         metadata = os.fstat(artifact.fileno())
         if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid not in (0, uid)
                 or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
-            raise ValueError(f"Module must be a regular file owned by the installing user or root: {source}")
+            raise ValueError(
+                f"Module must be a regular file owned by the installing user or root "
+                f"and not group/world-writable (chmod 0644): {source}"
+            )
         digest = hashlib.sha256()
-        with Path(destination).open("xb") as staged:
+        target = Path(destination)
+        with target.open("xb") as staged:
             while chunk := artifact.read(1024 * 1024):
                 digest.update(chunk)
                 staged.write(chunk)
         if digest.hexdigest() != expected:
+            target.unlink(missing_ok=True)
             raise ValueError(f"Module differs from the approved SHA-256: {source}")
 
 

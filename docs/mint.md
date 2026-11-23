@@ -40,7 +40,7 @@ The fan returns to firmware control below the curve's first temperature, when HP
 
 After booting a new kernel, install its matching headers and run `sh ./packaging/mint/install.sh` again. This keeps your saved curves. Until a module exists for the running kernel, HP automatic fan control remains in charge.
 
-If Secure Boot rejects the module, the installer stops at the load test. With an enrolled Machine Owner Key, build with `sh ./packaging/mint/install.sh --build-only`, sign the reported module using your system's enrolled key, then install it with `sh ./packaging/mint/install.sh --install-built driver/omnibook-fan-probe.ko`. See [Ubuntu's Secure Boot signing documentation](https://documentation.ubuntu.com/security/security-features/platform-protections/secure-boot/).
+If Secure Boot rejects the module, the installer stops at the load test. With an enrolled Machine Owner Key, build with `sh ./packaging/mint/install.sh --build-only`, sign both reported modules (`driver/omnibook-fan-probe.ko` and `driver/omnibook-charge-control.ko`) using your system's enrolled key (or sign only the fan module and pass `--without-charge`), then install with `sh ./packaging/mint/install.sh --install-built driver/omnibook-fan-probe.ko`. See [Ubuntu's Secure Boot signing documentation](https://documentation.ubuntu.com/security/security-features/platform-protections/secure-boot/).
 
 ## Check or remove
 

@@ -33,7 +33,7 @@ hp-charge-limit status
 hp-charge-limit disable
 ```
 
-The same settings and toggle appear in the desktop editor while the service is running. See the [NixOS setup](nixos.md) and [Mint setup](mint.md) for service activation.
+The same settings, live charging status, and toggles appear in the desktop editor and the Plasma 6 / Cinnamon panel widgets while the service is running. See the [NixOS setup](nixos.md) and [Mint setup](mint.md) for service activation.
 
 ## Read-only research
 

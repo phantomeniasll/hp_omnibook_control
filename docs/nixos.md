@@ -22,7 +22,7 @@ Set `plasmaWidget = false` on other desktops. Rebuild using your normal NixOS fl
 
 List the local accounts that may change controls in `controlUsers` and sign out and back in after activation. Members can run the fan and battery controls without password prompts.
 
-With the battery service installed, use **Battery Charging** in the Plasma widget or **Battery charging** in the editor or run `hp-charge-limit enable`. Set the stop and resume percentages in the widget or editor. The CLI uses hysteresis in percentage points, for example `hp-charge-limit set 80 5`. The charge setting is off on a fresh installation. Firmware compatibility on board 8DA8 is checked automatically. See [power management](power-management.md) for runtime and suspend behavior.
+With `services.omnibookFanCurves.batteryLimit.enable = true` (which loads the charge-control module needed for both the **HP hard 80% limit** and the **Custom soft limit**), use **Battery Charging** in the Plasma widget or **Battery charging** in the editor or run `hp-charge-limit enable` / `hp-charge-limit native-enable`. Set the stop and resume percentages in the widget or editor. The CLI uses hysteresis in percentage points, for example `hp-charge-limit set 80 5`. The custom soft limit is off on a fresh installation. Firmware compatibility on board 8DA8 is checked automatically. See [power management](power-management.md) for runtime and suspend behavior.
 
 This package's Plasma integration is a standalone widget. It is compatible with the stock Power & Battery widget and does not require modifying Plasma Shell or PowerDevil. The software exposes HP's separate modes if the running `hp-wmi` driver offers readable profiles. The [firmware notes](firmware.md) explain the readback issue on some kernels.
 

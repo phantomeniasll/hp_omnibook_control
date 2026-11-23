@@ -5,7 +5,7 @@ HP lists Battery Manager, enhanced call lighting, Poly Camera Pro, display and p
 | HP feature | Linux status |
 | --- | --- |
 | System Control thermal modes | HP WMI profiles are readable with the low-byte readback fix. The fan target is controlled separately in this project. |
-| Battery Manager | The firmware can pause charging under Linux. A Windows trace of disabling the native 80% limit showed a BIOS setting write. The exact setting and value still need verification. |
+| Battery Manager | Linux exposes both the native HP hard 80% limit (`Battery Health Manager` BIOS setting, confirmed via live write and readback on 8DA8) and the optional Linux custom soft charge pause. |
 | Display brightness | The AMD backlight device exposes current and maximum brightness. HP color presets and enhanced call lighting are separate features. |
 | Keyboard lighting | Linux exposes no keyboard backlight LED device on the tested kernel. Firmware hotkey support does not establish a Linux control path. |
 | Camera and presence | Linux exposes camera nodes and two proximity sensors. Poly effects, presence policy, and gestures need separate investigation. |
