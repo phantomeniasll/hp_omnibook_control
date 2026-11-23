@@ -1,6 +1,6 @@
 # HP OmniBook Fan Curves
 
-A desktop editor and background fan controller for the **HP OmniBook X Flip 16-ar0xxx**, board **8DA8**. BIOS **F.11** was tested on the laptop. Other BIOS versions on board 8DA8 start in read-only mode and require administrator opt-in for firmware writes. It includes four editable curves, timed Fan Boost, and live hardware temperatures.
+A desktop editor and background fan controller for the **HP OmniBook X Flip 16-ar0xxx**, board **8DA8**. BIOS **F.11** was tested on the laptop. Other BIOS versions on board 8DA8 are tried automatically when the expected firmware methods respond and confirm control requests. It includes four editable curves, timed Fan Boost, and live hardware temperatures.
 
 | Desktop or distribution | Setup |
 | --- | --- |
@@ -11,7 +11,7 @@ A desktop editor and background fan controller for the **HP OmniBook X Flip 16-a
 
 - **Quiet, Balanced, Cool, and Performance** each have their own editable curve. Automatic is the initial selection.
 - The background service applies the curve independently of the desktop editor. The kernel module limits the duration of an override if the service stops responding.
-- **Fan Boost** requests up to 4,500 RPM for up to 30 seconds followed by at least eight seconds of HP control.
+- **Fan Boost** requests up to 4,500 RPM for up to 30 seconds and then returns to the selected fan mode.
 - The editor shows live CPU, GPU, SSD, system, and Wi-Fi temperatures where the kernel exposes them.
 - The separate HP firmware buttons use the kernel's readable HP profile interface when available.
 - A root-owned service handles control requests from authorized local users without per-button password prompts.

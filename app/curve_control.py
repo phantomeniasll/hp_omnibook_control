@@ -18,14 +18,12 @@ CONFIG = STATE / "curves.json"
 STATUS = RUNTIME / "status.json"
 BOOST = RUNTIME / "boost-until"
 BOOST_DURATION = 30
-FIRMWARE_INTERVAL = 8
 MODULE = Path("/sys/module/omnibook_fan_probe")
 PARAM = MODULE / "parameters"
 RPM = Path("/sys/bus/acpi/devices/PNP0C0B:00/fan_speed_rpm")
 KEYS = ("quiet", "balanced", "cool", "performance")
 MIN_RPM, MAX_RPM = 3000, 4500
 BIN = Path(os.environ.get("OMNIBOOK_KMOD_BIN", "/usr/sbin"))
-BIOS_MODULE_ARGS = ["allow_untested_bios=1"] if os.environ.get("OMNIBOOK_ALLOW_UNTESTED_BIOS") == "1" else []
 
 
 def atomic_write(path, data):
@@ -140,37 +138,29 @@ def ensure_module():
         module_path = BASE / os.uname().release / "omnibook-fan-probe.ko"
         if not module_path.is_file():
             raise OSError("Fan curves are unavailable for this kernel")
-        subprocess.run([BIN / "insmod", module_path, "curve=1", *BIOS_MODULE_ARGS], check=True, capture_output=True, text=True)
+        subprocess.run([BIN / "insmod", module_path, "curve=1"], check=True, capture_output=True, text=True)
 
 
-def boost_times():
+def boost_deadline():
     try:
         state = json.loads(BOOST.read_text())
-        if isinstance(state, (int, float)):
-            return state, state + FIRMWARE_INTERVAL
-        return float(state["until"]), float(state["next"])
+        if isinstance(state, dict):
+            state = state["until"]
+        return float(state)
     except (OSError, ValueError, KeyError, TypeError):
-        return 0, 0
+        return 0
 
 
 def change_boost(start):
     with BOOST.with_suffix(".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        now = time.monotonic()
-        until, next_start = boost_times()
-        if start:
-            if now < until:
-                raise OSError("Fan Boost is already running.")
-            if now < next_start:
-                raise OSError("HP needs time to control the fan before another boost.")
-            until = now + BOOST_DURATION
-            next_start = until + FIRMWARE_INTERVAL
-        elif now < until:
-            until = 0
-            next_start = now + FIRMWARE_INTERVAL
-        else:
+        if not start:
+            BOOST.unlink(missing_ok=True)
             return
-        atomic_write(BOOST, json.dumps({"until": until, "next": next_start}) + "\n")
+        now = time.monotonic()
+        if now < boost_deadline():
+            raise OSError("Fan Boost is already running.")
+        atomic_write(BOOST, json.dumps({"until": now + BOOST_DURATION}) + "\n")
 
 
 def run():
@@ -192,8 +182,7 @@ def run():
             try:
                 config = load_config()
                 status["profile"] = profile = config["active"]
-                boost_until, next_boost = boost_times()
-                status["boost"] = boosting = boost_until > now
+                status["boost"] = boosting = boost_deadline() > now
                 status["rpm"] = int(RPM.read_text())
                 cpu = sensor(Path("/sys/class/hwmon"), "name", "k10temp", "temp1_input")
                 acpi = sensor(Path("/sys/class/thermal"), "type", "acpitz", "temp")
@@ -207,9 +196,6 @@ def run():
                 if hot:
                     requested = 0
                     status["state"] = "Firmware cooling"
-                elif not boosting and now < next_boost:
-                    requested = 0
-                    status["state"] = "Checking firmware fan speed"
                 if requested:
                     if abs(requested - last_target) == 50 and not boosting:
                         requested = last_target
@@ -224,7 +210,7 @@ def run():
                             errno.EALREADY: "Firmware fan speed is already sufficient",
                             errno.EAGAIN: "Checking firmware fan speed",
                             errno.EBUSY: "Firmware fan control unavailable",
-                            errno.EOPNOTSUPP: "Read-only BIOS support",
+                            errno.EOPNOTSUPP: "Firmware did not confirm fan control",
                         }
                         if error.errno not in reasons:
                             raise
@@ -270,9 +256,6 @@ def read_hp_mode():
 
 
 def switch_hp_mode(mode):
-    bios = Path("/sys/class/dmi/id/bios_version").read_text().strip()
-    if bios != "F.11" and not BIOS_MODULE_ARGS:
-        raise OSError("Firmware profile changes require administrator opt-in on this BIOS.")
     current, choices = read_hp_mode()
     if mode not in KEYS or mode not in choices:
         raise OSError("This kernel does not expose that HP thermal mode.")

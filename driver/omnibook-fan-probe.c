@@ -27,8 +27,7 @@
 #define CURVE_LEASE_SECONDS 6
 
 static acpi_handle pci0;
-static bool allow_untested_bios;
-static bool writes_allowed;
+static bool write_rejected;
 static bool ready;
 static bool curve;
 static bool active;
@@ -43,7 +42,6 @@ static unsigned long ownership_until;
 static unsigned long firmware_until;
 static DEFINE_MUTEX(fan_lock);
 
-module_param(allow_untested_bios, bool, 0400);
 module_param(curve, bool, 0444);
 module_param(active, bool, 0444);
 
@@ -145,8 +143,10 @@ static int restore_fan(void)
 	}
 	WRITE_ONCE(active, false);
 	recovering = false;
-	cooling_off = true;
-	firmware_until = jiffies + FIRMWARE_INTERVAL;
+	if (time_after_eq(jiffies, ownership_until)) {
+		cooling_off = true;
+		firmware_until = jiffies + FIRMWARE_INTERVAL;
+	}
 	owns_override = false;
 	pr_info("Automatic fan control restored\n");
 	module_put(THIS_MODULE);
@@ -206,7 +206,7 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 	if (!ready)
 		goto out;
 	result = -EOPNOTSUPP;
-	if (!writes_allowed)
+	if (!curve || write_rejected)
 		goto out;
 	result = -EBUSY;
 	if (suspended)
@@ -256,15 +256,15 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 		owns_override = true;
 		ownership_until = jiffies + MAX_OWNERSHIP;
 		if (set_override(true))
-			goto restore;
+			goto reject;
 	}
 	if (current_target != rpm / RPM_PER_UNIT &&
 	    mailbox_write(FAN_TARGET, rpm / RPM_PER_UNIT))
-		goto restore;
+		goto reject;
 	control = mailbox_read(FAN_CONTROL);
 	if (control < 0 || control == U8_MAX || !(control & FAN_OVERRIDE) ||
 	    mailbox_read(FAN_TARGET) != rpm / RPM_PER_UNIT)
-		goto restore;
+		goto reject;
 
 	active_target = rpm;
 	lease_until = jiffies + CURVE_LEASE_SECONDS * HZ;
@@ -275,6 +275,10 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 	result = 0;
 	goto out;
 
+reject:
+	write_rejected = true;
+	result = -EOPNOTSUPP;
+	pr_warn("Firmware did not confirm the fan command; restoring automatic control\n");
 restore:
 	restore_fan();
 out:
@@ -330,9 +334,8 @@ static int __init omnibook_fan_probe_init(void)
 		return -ENODEV;
 	}
 
-	writes_allowed = curve && (dmi_match(DMI_BIOS_VERSION, "F.11") || allow_untested_bios);
 	pr_info("Fan firmware access: %s; tachometer %d RPM, target %d RPM\n",
-		writes_allowed ? "curve control" : "read-only",
+		curve ? "curve control" : "read-only",
 		sample * RPM_PER_UNIT, target * RPM_PER_UNIT);
 	result = register_pm_notifier(&fan_pm_notifier);
 	if (!result) {

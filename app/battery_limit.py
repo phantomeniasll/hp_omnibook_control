@@ -1,3 +1,4 @@
+import errno
 import fcntl
 import json
 import os
@@ -7,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from curve_control import BASE, BIOS_MODULE_ARGS, BIN, atomic_write
+from curve_control import BASE, BIN, atomic_write
 
 BATTERY = Path("/sys/class/power_supply/BAT0")
 AC = Path("/sys/class/power_supply/ADP1/online")
@@ -16,6 +17,7 @@ PREFERENCE = Path("/var/lib/omnibook-charge-limit/enabled")
 CONFIG = PREFERENCE.with_name("settings.json")
 STATUS = Path("/run/omnibook-charge-limit/status.json")
 DEFAULT_LIMIT, DEFAULT_HYSTERESIS = 80, 5
+PAUSE_CONFIRM_SECONDS = 10
 
 
 def check_settings(limit, hysteresis):
@@ -65,7 +67,7 @@ def driver_ready():
     module = BASE / os.uname().release / "omnibook-charge-control.ko"
     if not module.is_file():
         raise OSError("No charge control module for this kernel")
-    result = subprocess.run([BIN / "insmod", module, *BIOS_MODULE_ARGS], capture_output=True, text=True)
+    result = subprocess.run([BIN / "insmod", module], capture_output=True, text=True)
     if result.returncode:
         raise OSError(result.stderr.strip() or "The kernel rejected the charge control module")
 
@@ -107,6 +109,8 @@ def status():
 
 def run():
     stopping = False
+    pause_started = None
+    pause_rejected = False
 
     def stop(_signal, _frame):
         nonlocal stopping
@@ -125,27 +129,41 @@ def run():
                     raise ValueError("Invalid battery charge percentage")
                 state["capacity"] = capacity
                 state["online"] = AC.read_text().strip() == "1"
-                if settings["enabled"] and state["online"]:
+                if not settings["enabled"]:
+                    pause_rejected = False
+                if settings["enabled"] and state["online"] and not pause_rejected:
                     driver_ready()
                     paused = PARAM.read_text().strip() == "Y"
-                    if paused and (BATTERY / "status").read_text().strip() == "Charging":
-                        release()
-                        paused = False
                     if target_mode(True, True, capacity, paused, settings["limit"],
                                    settings["hysteresis"]):
+                        now = time.monotonic()
+                        if pause_started is None or not paused:
+                            pause_started = now
+                        still_charging = (BATTERY / "status").read_text().strip() == "Charging"
+                        if paused and still_charging and now - pause_started >= PAUSE_CONFIRM_SECONDS:
+                            pause_rejected = True
+                            raise OSError("Battery continued charging after the firmware accepted the pause.")
                         PARAM.write_text("Y\n")
                         state["paused"] = True
-                        state["state"] = "Charging paused"
-                    elif paused:
-                        release()
+                        state["state"] = "Checking charge pause" if still_charging else "Charging paused"
+                    else:
+                        pause_started = None
+                        if paused:
+                            release()
                 else:
+                    pause_started = None
                     release()
+                    if pause_rejected:
+                        state["state"] = "Charge pause could not be verified. Toggle the limit to retry."
             except (OSError, ValueError) as error:
+                pause_started = None
                 try:
                     release()
                 except OSError:
                     pass
-                state["state"] = str(error)
+                state["state"] = ("Firmware did not confirm the charge-pause command."
+                                  if isinstance(error, OSError) and error.errno == errno.EOPNOTSUPP
+                                  else str(error))
             atomic_write(STATUS, json.dumps(state) + "\n")
             for _ in range(5):
                 if stopping:

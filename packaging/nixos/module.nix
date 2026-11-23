@@ -10,7 +10,11 @@ in {
     enable = lib.mkEnableOption "HP OmniBook 8DA8 fan curves";
     plasmaWidget = lib.mkEnableOption "the optional Plasma 6 fan control widget";
     batteryLimit.enable = lib.mkEnableOption "the optional battery charge-limit service";
-    allowUntestedBios = lib.mkEnableOption "experimental firmware writes on untested BIOS versions of HP board 8DA8";
+    allowUntestedBios = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Deprecated compatibility option. Firmware compatibility is checked automatically.";
+    };
     controlUsers = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -39,7 +43,6 @@ in {
       bindsTo = [ "omnibook-control.socket" ];
       after = [ "omnibook-control.socket" ];
       description = "HP OmniBook privileged control listener";
-      environment.OMNIBOOK_ALLOW_UNTESTED_BIOS = if cfg.allowUntestedBios then "1" else "0";
       serviceConfig = {
         ExecStart = "${app}/curve-python ${app}/control_runner.py listen";
         StandardOutput = "journal";
@@ -69,7 +72,6 @@ in {
       description = "HP OmniBook custom fan curves";
       after = [ "systemd-modules-load.service" ];
       wantedBy = [ "multi-user.target" ];
-      environment.OMNIBOOK_ALLOW_UNTESTED_BIOS = if cfg.allowUntestedBios then "1" else "0";
       unitConfig.ConditionArchitecture = "x86-64";
       serviceConfig = {
         ExecStart = "${app}/curve-python ${app}/curve_control.py run";
@@ -87,7 +89,6 @@ in {
       description = "HP OmniBook battery charge limit";
       after = [ "systemd-modules-load.service" ];
       wantedBy = [ "multi-user.target" ];
-      environment.OMNIBOOK_ALLOW_UNTESTED_BIOS = if cfg.allowUntestedBios then "1" else "0";
       unitConfig.ConditionPathExists = "/sys/class/power_supply/BAT0";
       serviceConfig = {
         ExecStart = "${app}/curve-python ${app}/battery_limit.py run";

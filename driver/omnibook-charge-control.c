@@ -19,16 +19,13 @@
 
 static DEFINE_MUTEX(charge_lock);
 static bool ready;
-static bool writes_allowed;
-static bool allow_untested_bios;
+static bool write_rejected;
 static bool owned;
 static bool inhibited;
 static bool suspended;
 static unsigned long lease_until;
 static void expire_inhibit(struct work_struct *work);
 static DECLARE_DELAYED_WORK(expiry, expire_inhibit);
-
-module_param(allow_untested_bios, bool, 0400);
 
 static int sbco(unsigned int mode)
 {
@@ -130,7 +127,7 @@ static int charge_set(const char *value, const struct kernel_param *parameter)
 		goto out;
 	}
 	result = -EOPNOTSUPP;
-	if (!writes_allowed)
+	if (write_rejected)
 		goto out;
 	result = -EBUSY;
 	if (suspended)
@@ -154,8 +151,10 @@ static int charge_set(const char *value, const struct kernel_param *parameter)
 			goto renew;
 		}
 	}
+	write_rejected = true;
+	pr_warn("Firmware did not confirm the charge command; restoring automatic charging\n");
 	restore_charge();
-	result = -EIO;
+	result = -EOPNOTSUPP;
 	goto out;
 renew:
 	lease_until = jiffies + LEASE_TIME;
@@ -226,8 +225,7 @@ static int __init charge_init(void)
 		pr_info("ACPI did not return a recognized charging mode\n");
 		return -ENODEV;
 	}
-	writes_allowed = dmi_match(DMI_BIOS_VERSION, "F.11") || allow_untested_bios;
-	pr_info("Battery firmware access: %s\n", writes_allowed ? "pause control" : "read-only");
+	pr_info("ACPI charging methods available; pause requests require firmware confirmation\n");
 
 	result = register_pm_notifier(&sleep_notifier);
 	if (!result) {
