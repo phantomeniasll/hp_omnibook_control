@@ -52,6 +52,6 @@ Removal stops the service and unloads the driver. Saved curves remain at `/var/l
 
 ## Battery charging
 
-When the charge module was built alongside the fan module, the installer also starts the charge-limit service. Choose **Set 80% Charge Limit** in the editor or run `sudo hp-charge-limit enable`. On Secure Boot systems the charge module must be signed separately before it can load.
+When the charge module was built alongside the fan module, the installer also starts the charge-limit service. Use **Battery charging** in the editor or run `sudo hp-charge-limit set 80 5` and `sudo hp-charge-limit enable`. On Secure Boot systems the charge module must be signed separately before it can load.
 
 See [power management](power-management.md) for HP Battery Care, Linux charge thresholds, and the separate research probe.

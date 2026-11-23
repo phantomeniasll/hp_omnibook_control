@@ -34,7 +34,7 @@ EOF
 chmod 755 /usr/local/bin/hp-charge-limit
 cat > "$units/$service" <<EOF
 [Unit]
-Description=HP OmniBook 80 percent charge limit
+Description=HP OmniBook battery charge limit
 After=systemd-modules-load.service
 
 [Service]
@@ -55,4 +55,4 @@ systemctl daemon-reload
 systemctl restart "$service"
 /usr/local/bin/hp-charge-limit enable
 systemctl is-active "$service"
-printf '80%% limit enabled. Check it with /usr/local/bin/hp-charge-limit status.\n'
+printf 'Charge limit enabled. Check it with /usr/local/bin/hp-charge-limit status.\n'

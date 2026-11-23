@@ -6,14 +6,14 @@ try:
     from PySide6.QtCore import QProcess, QTimer
     from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import (
-        QAbstractItemView, QApplication, QComboBox, QDialog, QHBoxLayout,
+        QAbstractItemView, QApplication, QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout,
         QHeaderView, QLabel, QPushButton, QSpinBox, QTableWidget, QVBoxLayout,
     )
 except ImportError:
     from PyQt6.QtCore import QProcess, QTimer
     from PyQt6.QtGui import QIcon
     from PyQt6.QtWidgets import (
-        QAbstractItemView, QApplication, QComboBox, QDialog, QHBoxLayout,
+        QAbstractItemView, QApplication, QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout,
         QHeaderView, QLabel, QPushButton, QSpinBox, QTableWidget, QVBoxLayout,
     )
 
@@ -45,9 +45,33 @@ class CurveEditor(QDialog):
         self.temperatures = QLabel()
         self.temperatures.setWordWrap(True)
         layout.addWidget(self.temperatures)
+        self.charge_controls = QGroupBox("Battery charging")
+        self.charge_values_loaded = False
+        charge_form = QFormLayout(self.charge_controls)
+        self.charge_limit = QSpinBox()
+        self.charge_limit.setRange(2, 100)
+        self.charge_limit.setSuffix("%")
+        self.charge_hysteresis = QSpinBox()
+        self.charge_hysteresis.setRange(1, 99)
+        self.charge_hysteresis.setSuffix(" pp")
+        self.charge_limit.valueChanged.connect(
+            lambda value: self.charge_hysteresis.setMaximum(value - 1))
+        self.charge_hysteresis.setToolTip("Percentage points below the limit at which charging resumes.")
+        charge_form.addRow("Stop charging at", self.charge_limit)
+        charge_form.addRow("Hysteresis", self.charge_hysteresis)
+        self.charge_status = QLabel()
+        self.charge_status.setWordWrap(True)
+        charge_form.addRow(self.charge_status)
+        charge_actions = QHBoxLayout()
+        self.save_charge = QPushButton("Save Charging Settings")
+        self.save_charge.clicked.connect(lambda: self.battery_command(
+            "set", str(self.charge_limit.value()), str(self.charge_hysteresis.value())))
         self.battery_limit = QPushButton()
         self.battery_limit.clicked.connect(self.switch_battery_limit)
-        layout.addWidget(self.battery_limit)
+        charge_actions.addWidget(self.save_charge)
+        charge_actions.addWidget(self.battery_limit)
+        charge_form.addRow(charge_actions)
+        layout.addWidget(self.charge_controls)
 
         hp_row = QHBoxLayout()
         self.hp_modes = {}
@@ -174,13 +198,19 @@ class CurveEditor(QDialog):
         running = bool(value)
         busy = self.process.state() != QProcess.ProcessState.NotRunning
         has_battery_service = BATTERY_LIMIT_STATUS.is_file()
-        self.battery_limit.setVisible(has_battery_service)
+        self.charge_controls.setVisible(has_battery_service)
         if has_battery_service:
             battery = battery_limit_status()
-            self.battery_limit.setText("Turn Off 80% Charge Limit" if battery["enabled"] else
-                                       "Set 80% Charge Limit")
-            self.battery_limit.setToolTip(battery.get("state", ""))
-            self.battery_limit.setEnabled(not busy)
+            limit, hysteresis = battery["limit"], battery["hysteresis"]
+            if not self.charge_values_loaded:
+                self.charge_limit.setValue(limit)
+                self.charge_hysteresis.setValue(hysteresis)
+            self.battery_limit.setText("Disable Charge Limit" if battery["enabled"] else
+                                       "Enable Charge Limit")
+            thresholds = f"Stop at {limit}%, resume at {limit - hysteresis}%"
+            self.charge_status.setText(f'{thresholds}\n{battery.get("state", "")}')
+            self.charge_controls.setEnabled(not busy)
+        self.charge_values_loaded = has_battery_service
         for button in (self.fan_boost, self.automatic, self.save, self.apply):
             button.setEnabled(running and not busy)
         self.fan_boost.setText("End Fan Boost" if value.get("boost") else "Fan Boost (30 s)")
@@ -214,9 +244,11 @@ class CurveEditor(QDialog):
         self.refresh()
 
     def switch_battery_limit(self):
-        operation = "disable" if battery_limit_status()["enabled"] else "enable"
+        self.battery_command("disable" if battery_limit_status()["enabled"] else "enable")
+
+    def battery_command(self, *operations):
         self.process.start(PKEXEC, ["--disable-internal-agent", str(BASE / "curve-python"),
-                                    str(BASE / "battery_limit.py"), operation])
+                                    str(BASE / "battery_limit.py"), *operations])
         self.message.setText("Waiting for authorization…")
         self.refresh()
 

@@ -9,7 +9,7 @@ in {
   options.services.omnibookFanCurves = {
     enable = lib.mkEnableOption "HP OmniBook 8DA8 fan curves";
     plasmaWidget = lib.mkEnableOption "the optional Plasma 6 fan control widget";
-    batteryLimit.enable = lib.mkEnableOption "the optional 80 percent charge-limit service";
+    batteryLimit.enable = lib.mkEnableOption "the optional battery charge-limit service";
   };
 
   config = lib.mkIf cfg.enable {
@@ -34,7 +34,7 @@ in {
     };
 
     systemd.services.omnibook-charge-limit = lib.mkIf cfg.batteryLimit.enable {
-      description = "HP OmniBook 80 percent charge limit";
+      description = "HP OmniBook battery charge limit";
       after = [ "systemd-modules-load.service" ];
       wantedBy = [ "multi-user.target" ];
       unitConfig.ConditionPathExists = "/sys/class/power_supply/BAT0";

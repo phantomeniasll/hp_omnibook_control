@@ -1,5 +1,5 @@
 [Unit]
-Description=HP OmniBook 80 percent charge limit
+Description=HP OmniBook battery charge limit
 After=systemd-modules-load.service
 ConditionPathExists=/sys/class/power_supply/BAT0
 
