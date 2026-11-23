@@ -11,6 +11,12 @@ stdenv.mkDerivation {
     fileset = lib.fileset.unions [
       ../../app
       ../mint/hp-fan-curves.desktop
+      ../mint/omnibook-control.socket
+      ../mint/omnibook-control.service
+      ../mint/omnibook-fan-curves.service
+      ../mint/omnibook-charge-limit.service
+      ../stage-module.py
+      ./install-live-battery-limit.sh
       ./plasma
     ];
   };
@@ -42,6 +48,13 @@ EOF
 exec "$app/curve-python" "$app/battery_limit.py" "\$@"
 EOF
     chmod 755 "$out/bin/hp-charge-limit"
+    installer="$out/share/omnibook-live-install"
+    install -Dm755 packaging/nixos/install-live-battery-limit.sh \
+      "$installer/packaging/nixos/install-live-battery-limit.sh"
+    install -Dm644 packaging/stage-module.py "$installer/packaging/stage-module.py"
+    install -d "$installer/packaging/mint"
+    install -m644 packaging/mint/omnibook-*.* "$installer/packaging/mint/"
+    ln -s "$installer/packaging/nixos/install-live-battery-limit.sh" "$out/bin/hp-install-live"
     install -Dm644 packaging/mint/hp-fan-curves.desktop "$out/share/applications/hp-fan-curves.desktop"
     substituteInPlace "$out/share/applications/hp-fan-curves.desktop" \
       --replace-fail /usr/local/lib/omnibook-fan-curves/open-curve-editor "$out/bin/hp-fan-curves"

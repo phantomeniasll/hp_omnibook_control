@@ -5,13 +5,8 @@ Description=HP OmniBook control socket
 ListenStream=/run/omnibook-control.sock
 SocketMode=0660
 SocketGroup=omnibook-control
-Accept=yes
-MaxConnections=16
-MaxConnectionsPerSource=2
 Backlog=32
 TriggerLimitIntervalSec=0
-PollLimitIntervalSec=1s
-PollLimitBurst=16
 RemoveOnStop=yes
 
 [Install]

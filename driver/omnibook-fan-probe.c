@@ -19,7 +19,7 @@
 #define FAN_OVERRIDE BIT(4)
 #define RPM_PER_UNIT 50
 #define REQUESTED_RPM 4500
-#define MAX_OWNERSHIP (30 * HZ)
+#define MAX_OWNERSHIP (120 * HZ)
 #define FIRMWARE_INTERVAL (8 * HZ)
 #define ACPI_TEMP_MIN 2732
 #define ACPI_TEMP_LIMIT 3482
@@ -33,6 +33,7 @@ static bool ready;
 static bool curve;
 static bool active;
 static bool owns_override;
+static bool recovering;
 static bool cooling_off;
 static bool suspended;
 static int active_target;
@@ -118,16 +119,32 @@ static bool safe_to_boost(void)
 static void monitor_override(struct work_struct *work);
 static DECLARE_DELAYED_WORK(override_work, monitor_override);
 
+static int handoff_get(char *buffer, const struct kernel_param *parameter)
+{
+	int length;
+
+	mutex_lock(&fan_lock);
+	length = sysfs_emit(buffer, "%s\n", recovering ? "recovering" :
+			   active ? "override" : "firmware");
+	mutex_unlock(&fan_lock);
+	return length;
+}
+
+static const struct kernel_param_ops handoff_ops = { .get = handoff_get };
+module_param_cb(handoff, &handoff_ops, NULL, 0444);
+
 /* Hold a module reference from the first attempted write through verified restore. */
 static int restore_fan(void)
 {
 	if (!owns_override)
 		return 0;
-	WRITE_ONCE(active, false);
+	recovering = true;
 	if (clear_override()) {
 		mod_delayed_work(system_wq, &override_work, HZ);
 		return -EIO;
 	}
+	WRITE_ONCE(active, false);
+	recovering = false;
 	cooling_off = true;
 	firmware_until = jiffies + FIRMWARE_INTERVAL;
 	owns_override = false;
@@ -144,7 +161,7 @@ static void monitor_override(struct work_struct *work)
 	if (!ready || !owns_override)
 		goto out;
 
-	if (!active || time_after_eq(jiffies, lease_until) ||
+	if (recovering || !active || time_after_eq(jiffies, lease_until) ||
 	    time_after_eq(jiffies, ownership_until) || !safe_to_boost())
 		goto restore;
 	tachometer = mailbox_read(FAN_TACHOMETER);
@@ -193,6 +210,8 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 		goto out;
 	result = -EBUSY;
 	if (suspended)
+		goto out;
+	if (recovering)
 		goto out;
 	if (!safe_to_boost()) {
 		restore_fan();

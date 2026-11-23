@@ -113,9 +113,18 @@ def curve_rpm(points, temperature):
 
 
 def firmware_control():
+    if fan_recovering():
+        return
     if ((PARAM / "curve").exists() and (PARAM / "curve").read_text().strip() == "Y" and
             (PARAM / "active").read_text().strip() == "Y"):
         (PARAM / "cancel").write_text("Y\n")
+
+
+def fan_recovering():
+    try:
+        return (PARAM / "handoff").read_text().strip() == "recovering"
+    except FileNotFoundError:
+        return False
 
 
 def ensure_module():
@@ -125,8 +134,8 @@ def ensure_module():
             if (PARAM / "curve").read_text().strip() == "Y":
                 return
         if MODULE.exists():
-            if (PARAM / "active").read_text().strip() == "Y":
-                raise OSError("Waiting for the previous Fan Boost to finish")
+            if fan_recovering() or (PARAM / "active").read_text().strip() == "Y":
+                raise OSError("Waiting for the fan override to be released")
             subprocess.run([BIN / "rmmod", MODULE.name], check=True, capture_output=True, text=True)
         module_path = BASE / os.uname().release / "omnibook-fan-probe.ko"
         if not module_path.is_file():
@@ -232,6 +241,8 @@ def run():
                     pass
                 last_target = 0
                 status["state"] = "Firmware control: " + str(error)
+            if fan_recovering():
+                status.update(state="Restoring HP fan control", target=0)
             atomic_write(STATUS, json.dumps(status) + "\n")
             time.sleep(1)
     finally:
@@ -287,6 +298,8 @@ def main(args):
     elif args == ["panel-status"]:
         mode, choices = read_hp_mode()
         status = load_status()
+        if fan_recovering():
+            status.update(state="Restoring HP fan control", target=0)
         print(mode or "unavailable")
         try:
             print(int(RPM.read_text()))

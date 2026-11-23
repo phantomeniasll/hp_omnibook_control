@@ -19,10 +19,12 @@ Installation targets Linux Mint 22 Cinnamon and builds a module for the currentl
 ```sh
 sudo apt update
 sudo apt install build-essential "linux-headers-$(uname -r)" kmod python3 python3-pyqt6
+export OMNIBOOK_RELEASE_ARCHIVE="/absolute/path/to/omnibook-fan-curves.tar.gz"
+export OMNIBOOK_RELEASE_SHA256="<SHA-256 from a trusted release channel>"
 sh ./packaging/mint/install.sh
 ```
 
-The installer builds as your user, then requests administrator access to test the module and install the app and service. It grants the installing account access through the `omnibook-control` group. Sign out and back in once to activate the membership. The installed controls then work without password prompts. Keep the extracted folder for future kernel updates.
+Use the launcher from a verified release. From a Git checkout, set `OMNIBOOK_TRUSTED_COMMIT` to the full hash of a revision you have reviewed instead of setting the two archive variables. The launcher builds modules as your user, then requests administrator access. It verifies the privileged payload checksum in a private root-owned staging directory, stages and tests the modules, and retains the previous app, units, and enablement links until the new services start successfully. It grants the installing account access through the `omnibook-control` group. Sign out and back in once to activate the membership. The installed controls then work without password prompts. Keep the extracted folder for future kernel updates.
 
 Open **HP Fan Curves** from the Cinnamon application menu. Right-click the menu result and choose **Add to panel** if you want quick access. The app can be closed while the service runs.
 
@@ -58,4 +60,4 @@ See [power management](power-management.md) for HP Battery Care, Linux charge th
 
 For a fan-only upgrade, pass `--install-built FILE --without-charge`. This removes the old charge service, launcher, and modules and retains the charge preferences.
 
-For explicit firmware write testing on another BIOS on board 8DA8, add a systemd drop-in to `omnibook-fan-curves.service`, `omnibook-charge-limit.service` if installed, and `omnibook-control@.service` with `Environment=OMNIBOOK_ALLOW_UNTESTED_BIOS=1` under `[Service]`. Reboot so any previously loaded modules use the new opt-in policy.
+For explicit firmware write testing on another BIOS on board 8DA8, add a systemd drop-in to `omnibook-fan-curves.service`, `omnibook-charge-limit.service` if installed, and `omnibook-control.service` with `Environment=OMNIBOOK_ALLOW_UNTESTED_BIOS=1` under `[Service]`. Reboot so any previously loaded modules use the new opt-in policy.

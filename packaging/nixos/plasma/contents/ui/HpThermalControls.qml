@@ -108,6 +108,8 @@ ColumnLayout {
     function fanDecision() {
         if (!fan.state)
             return i18n("Fan service unavailable.");
+        if (fan.state === "Restoring HP fan control")
+            return i18n("Restoring HP fan control. The firmware has not confirmed the handoff.");
         if (fan.target > 0)
             return boostActive
                 ? i18n("Fan boost requests %1 RPM.", fan.target)

@@ -32,7 +32,7 @@ The service starts with **Automatic** on a fresh installation. Use the editor to
 sudo systemctl stop omnibook-fan-curves.service
 ```
 
-Saved curves live in `/var/lib/omnibook-fan-curves/curves.json`. On a host previously set up with the experimental installer, remove the old unmanaged unit before installing the declarative one. Inspect `systemctl show -p FragmentPath omnibook-fan-curves.service` to identify it. If you used the unmanaged battery installer too, check `omnibook-charge-limit.service`, `omnibook-control.socket`, and its `omnibook-control@.service` template under `/usr/local/lib/systemd/system` before switching to declarative units.
+Saved curves live in `/var/lib/omnibook-fan-curves/curves.json`. On a host previously set up with the experimental installer, remove the old unmanaged unit before installing the declarative one. Inspect `systemctl show -p FragmentPath omnibook-fan-curves.service` to identify it. If you used the unmanaged battery installer too, check `omnibook-charge-limit.service`, `omnibook-control.socket`, and `omnibook-control.service` (or the old `omnibook-control@.service` template) under `/usr/local/lib/systemd/system` before switching to declarative units.
 
 ## Package checks
 
@@ -43,3 +43,12 @@ nix build
 ```
 
 The flake's standalone build uses its pinned latest kernel. The NixOS module instead uses your host's `boot.kernelPackages`.
+
+## Existing unmanaged installation
+
+For a live upgrade on a host that already runs the unmanaged service, build the Nix package and invoke its immutable installer. Pass the paths and verified SHA-256 hashes of modules built for the currently running kernel. The fan module and its hash are optional if only updating the charge limiter.
+
+```sh
+sudo ./result/bin/hp-install-live /path/to/omnibook-charge-control.ko CHARGE_SHA256 \
+  /path/to/omnibook-fan-probe.ko FAN_SHA256
+```

@@ -29,26 +29,24 @@ in {
         ListenStream = "/run/omnibook-control.sock";
         SocketMode = "0660";
         SocketGroup = "omnibook-control";
-        Accept = true;
-        MaxConnections = 16;
-        MaxConnectionsPerSource = 2;
         Backlog = 32;
         TriggerLimitIntervalSec = 0;
-        PollLimitIntervalSec = "1s";
-        PollLimitBurst = 16;
         RemoveOnStop = true;
       };
     };
 
-    systemd.services."omnibook-control@" = {
-      description = "HP OmniBook privileged control request";
+    systemd.services.omnibook-control = {
+      bindsTo = [ "omnibook-control.socket" ];
+      after = [ "omnibook-control.socket" ];
+      description = "HP OmniBook privileged control listener";
       environment.OMNIBOOK_ALLOW_UNTESTED_BIOS = if cfg.allowUntestedBios then "1" else "0";
       serviceConfig = {
-        ExecStart = "${app}/curve-python ${app}/control_runner.py serve";
-        StandardInput = "socket";
+        ExecStart = "${app}/curve-python ${app}/control_runner.py listen";
         StandardOutput = "journal";
         StandardError = "journal";
-        RuntimeMaxSec = 10;
+        Restart = "on-failure";
+        RestartSec = 1;
+        TasksMax = 24;
         NoNewPrivileges = true;
         CapabilityBoundingSet = "";
         ProtectSystem = "strict";
