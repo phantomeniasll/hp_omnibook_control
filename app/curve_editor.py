@@ -49,21 +49,20 @@ class CurveEditor(QDialog):
         self.charge_limit = QSpinBox()
         self.charge_limit.setRange(2, 100)
         self.charge_limit.setSuffix("%")
-        self.charge_hysteresis = QSpinBox()
-        self.charge_hysteresis.setRange(1, 99)
-        self.charge_hysteresis.setSuffix(" pp")
+        self.charge_resume = QSpinBox()
+        self.charge_resume.setRange(1, 99)
+        self.charge_resume.setSuffix("%")
         self.charge_limit.valueChanged.connect(
-            lambda value: self.charge_hysteresis.setMaximum(value - 1))
-        self.charge_hysteresis.setToolTip("Percentage points below the limit at which charging resumes.")
+            lambda value: self.charge_resume.setMaximum(value - 1))
+        self.charge_resume.setToolTip("Charging resumes at or below this battery percentage.")
         charge_form.addRow("Stop charging at", self.charge_limit)
-        charge_form.addRow("Hysteresis", self.charge_hysteresis)
+        charge_form.addRow("Resume charging at", self.charge_resume)
         self.charge_status = QLabel()
         self.charge_status.setWordWrap(True)
         charge_form.addRow(self.charge_status)
         charge_actions = QHBoxLayout()
         self.save_charge = QPushButton("Save Charging Settings")
-        self.save_charge.clicked.connect(lambda: self.battery_command(
-            "set", str(self.charge_limit.value()), str(self.charge_hysteresis.value())))
+        self.save_charge.clicked.connect(self.save_charge_settings)
         self.battery_limit = QPushButton()
         self.battery_limit.clicked.connect(self.switch_battery_limit)
         charge_actions.addWidget(self.save_charge)
@@ -202,7 +201,7 @@ class CurveEditor(QDialog):
             limit, hysteresis = battery["limit"], battery["hysteresis"]
             if not self.charge_values_loaded:
                 self.charge_limit.setValue(limit)
-                self.charge_hysteresis.setValue(hysteresis)
+                self.charge_resume.setValue(limit - hysteresis)
             self.battery_limit.setText("Disable Charge Limit" if battery["enabled"] else
                                        "Enable Charge Limit")
             thresholds = f"Stop at {limit}%, resume at {limit - hysteresis}%"
@@ -239,6 +238,10 @@ class CurveEditor(QDialog):
         self.process.start(str(BASE / "curve-python"), arguments)
         self.message.setText("Applying fan setting…")
         self.refresh()
+
+    def save_charge_settings(self):
+        limit = self.charge_limit.value()
+        self.battery_command("set", str(limit), str(limit - self.charge_resume.value()))
 
     def switch_battery_limit(self):
         self.battery_command("disable" if battery_limit_status()["enabled"] else "enable")

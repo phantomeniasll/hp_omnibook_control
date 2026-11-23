@@ -79,12 +79,29 @@ def status():
     try:
         state = json.loads(STATUS.read_text())
     except (OSError, ValueError):
-        state = {"state": "Charge limit service is inactive"}
+        state = {"service_active": False, "state": "Charge limit service is inactive"}
+    else:
+        state["service_active"] = True
     try:
         state.update(load_settings())
     except (OSError, ValueError) as error:
         state.update(enabled=False, limit=DEFAULT_LIMIT, hysteresis=DEFAULT_HYSTERESIS,
                      state=str(error))
+    state["battery_status"] = None
+    state["power_watts"] = None
+    try:
+        state["battery_status"] = (BATTERY / "status").read_text().strip()
+        state["capacity"] = int((BATTERY / "capacity").read_text())
+    except (OSError, ValueError):
+        pass
+    try:
+        state["online"] = AC.read_text().strip() == "1"
+    except OSError:
+        state["online"] = None
+    try:
+        state["power_watts"] = int((BATTERY / "power_now").read_text()) / 1_000_000
+    except (OSError, ValueError):
+        pass
     return state
 
 

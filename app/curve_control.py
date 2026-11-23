@@ -263,6 +263,7 @@ def main(args):
         print(status.get("profile", "unavailable"))
         print(json.dumps(readings(), ensure_ascii=True))
         print(json.dumps(choices))
+        print(json.dumps({"target": status.get("target", 0), "state": status.get("state", "")}))
     elif os.geteuid() != 0:
         from control_runner import request
         request("fan", args)
