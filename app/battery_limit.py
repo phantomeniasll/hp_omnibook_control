@@ -3,6 +3,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import select
 import signal
 import subprocess
 import sys
@@ -10,8 +11,9 @@ import time
 
 from curve_control import BASE, BIN, atomic_write
 
-BATTERY = Path("/sys/class/power_supply/BAT0")
-AC = Path("/sys/class/power_supply/ADP1/online")
+POWER_SUPPLY = Path("/sys/class/power_supply")
+BATTERY = POWER_SUPPLY / "BAT0"
+AC = POWER_SUPPLY / "ADP1" / "online"
 PARAM = Path("/sys/module/omnibook_charge_control/parameters/inhibit")
 NATIVE_LIMIT = PARAM.with_name("native_limit")
 PREFERENCE = Path("/var/lib/omnibook-charge-limit/enabled")
@@ -19,6 +21,35 @@ CONFIG = PREFERENCE.with_name("settings.json")
 STATUS = Path("/run/omnibook-charge-limit/status.json")
 DEFAULT_LIMIT, DEFAULT_HYSTERESIS = 80, 5
 PAUSE_CONFIRM_SECONDS = 10
+STATUS_MAX_AGE = 20
+
+
+def boottime():
+    return time.clock_gettime(time.CLOCK_BOOTTIME)
+
+
+def battery_device():
+    if BATTERY.is_dir():
+        return BATTERY
+    for device in sorted(POWER_SUPPLY.glob("*")):
+        try:
+            if (device / "type").read_text().strip() == "Battery":
+                return device
+        except OSError:
+            continue
+    return BATTERY
+
+
+def ac_online_path():
+    if AC.is_file():
+        return AC
+    for device in sorted(POWER_SUPPLY.glob("*")):
+        try:
+            if (device / "type").read_text().strip() == "Mains" and (device / "online").is_file():
+                return device / "online"
+        except OSError:
+            continue
+    return AC
 
 
 def check_settings(limit, hysteresis):
@@ -41,6 +72,8 @@ def load_settings():
 
 
 def change_settings(args):
+    if not CONFIG.parent.is_dir():
+        raise OSError("Install the battery charge-limit service first.")
     with CONFIG.with_suffix(".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         settings = load_settings()
@@ -84,7 +117,14 @@ def status():
     except (OSError, ValueError):
         state = {"service_active": False, "state": "Charge limit service is inactive"}
     else:
-        state["service_active"] = True
+        updated_at = state.get("updated_at")
+        if isinstance(updated_at, (int, float)):
+            age = boottime() - updated_at
+            state["service_active"] = -5 <= age <= STATUS_MAX_AGE
+            if not state["service_active"]:
+                state["state"] = "Charge limit service is unresponsive"
+        else:
+            state["service_active"] = True
     try:
         state.update(load_settings())
     except (OSError, ValueError) as error:
@@ -93,22 +133,24 @@ def status():
     state["battery_status"] = None
     state["power_watts"] = None
     state["native_limit"] = None
+    battery = battery_device()
+    ac = ac_online_path()
     try:
         state["native_limit"] = {"Y": "on", "N": "off", "?": "unknown"}.get(
             NATIVE_LIMIT.read_text().strip())
     except OSError:
         pass
     try:
-        state["battery_status"] = (BATTERY / "status").read_text().strip()
-        state["capacity"] = int((BATTERY / "capacity").read_text())
+        state["battery_status"] = (battery / "status").read_text().strip()
+        state["capacity"] = int((battery / "capacity").read_text())
     except (OSError, ValueError):
         pass
     try:
-        state["online"] = AC.read_text().strip() == "1"
+        state["online"] = ac.read_text().strip() == "1"
     except OSError:
         state["online"] = None
     try:
-        state["power_watts"] = int((BATTERY / "power_now").read_text()) / 1_000_000
+        state["power_watts"] = int((battery / "power_now").read_text()) / 1_000_000
     except (OSError, ValueError):
         pass
     return state
@@ -118,10 +160,17 @@ def run():
     stopping = False
     pause_started = None
     pause_rejected = False
+    wake_read, wake_write = os.pipe()
+    os.set_blocking(wake_read, False)
+    os.set_blocking(wake_write, False)
 
     def stop(_signal, _frame):
         nonlocal stopping
         stopping = True
+        try:
+            os.write(wake_write, b"\0")
+        except OSError:
+            pass
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -131,11 +180,13 @@ def run():
                      "capacity": None, "online": False, "state": "Automatic charging"}
             try:
                 settings = load_settings()
-                capacity = int((BATTERY / "capacity").read_text())
+                battery = battery_device()
+                ac = ac_online_path()
+                capacity = int((battery / "capacity").read_text())
                 if not 0 <= capacity <= 100:
                     raise ValueError("Invalid battery charge percentage")
                 state["capacity"] = capacity
-                state["online"] = AC.read_text().strip() == "1"
+                state["online"] = ac.read_text().strip() == "1"
                 if not settings["enabled"]:
                     pause_rejected = False
                 if settings["enabled"] and state["online"] and not pause_rejected:
@@ -146,7 +197,7 @@ def run():
                         now = time.monotonic()
                         if pause_started is None or not paused:
                             pause_started = now
-                        still_charging = (BATTERY / "status").read_text().strip() == "Charging"
+                        still_charging = (battery / "status").read_text().strip() == "Charging"
                         if paused and still_charging and now - pause_started >= PAUSE_CONFIRM_SECONDS:
                             pause_rejected = True
                             raise OSError("Battery continued charging after the firmware accepted the pause.")
@@ -171,13 +222,21 @@ def run():
                 state["state"] = ("Firmware did not confirm the charge-pause command."
                                   if isinstance(error, OSError) and error.errno == errno.EOPNOTSUPP
                                   else str(error))
+            state["updated_at"] = round(boottime(), 3)
             atomic_write(STATUS, json.dumps(state) + "\n")
-            for _ in range(5):
-                if stopping:
-                    break
-                time.sleep(1)
+            if not stopping:
+                try:
+                    select.select([wake_read], [], [], 5)
+                except InterruptedError:
+                    pass
     finally:
-        release()
+        os.close(wake_read)
+        os.close(wake_write)
+        try:
+            release()
+        except OSError:
+            pass
+        STATUS.unlink(missing_ok=True)
 
 
 def main(args):
