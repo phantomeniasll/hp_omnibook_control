@@ -14,6 +14,7 @@ SOCKET = Path("/run/omnibook-control.sock")
 MAX_REQUEST = 16384
 READ_TIMEOUT = 2
 WORKER_TIMEOUT = 6
+IDLE_TIMEOUT = 30
 MAX_WORKERS = 16
 PER_UID_WORKERS = 2
 PER_UID_RATE = 8
@@ -104,7 +105,6 @@ def listen(listener):
     active = Counter()
     rate = Counter()
     window_end = time.monotonic() + 1
-    listener.settimeout(0.25)
     while True:
         now = time.monotonic()
         if now >= window_end:
@@ -120,9 +120,12 @@ def listen(listener):
             if not active[uid]:
                 del active[uid]
 
+        listener.settimeout(0.25 if workers else IDLE_TIMEOUT)
         try:
             peer, _ = listener.accept()
         except TimeoutError:
+            if not workers:
+                return
             continue
         with peer:
             try:

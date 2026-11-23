@@ -41,7 +41,8 @@ in {
 
     systemd.services.omnibook-control = {
       bindsTo = [ "omnibook-control.socket" ];
-      after = [ "omnibook-control.socket" ] ++ lib.optional cfg.batteryLimit.enable "omnibook-charge-limit.service";
+      after = [ "omnibook-control.socket" "omnibook-fan-curves.service" ]
+        ++ lib.optional cfg.batteryLimit.enable "omnibook-charge-limit.service";
       description = "HP OmniBook privileged control listener";
       serviceConfig = {
         ExecStart = "${app}/curve-python ${app}/control_runner.py listen";

@@ -108,8 +108,8 @@ chmod 755 /usr/local/bin/hp-charge-limit
 
 systemctl daemon-reload
 systemctl start "$socket" "$battery"
-"$python" "$dest/control_runner.py" check
 if [ -f "$fan_module" ]; then systemctl start "$fan"; fi
+"$python" "$dest/control_runner.py" check
 if [ -n "$account" ] && [ "$account" != root ] && command -v setfacl >/dev/null; then
     setfacl -m "u:$account:rw" /run/omnibook-control.sock
 fi

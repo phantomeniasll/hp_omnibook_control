@@ -2,7 +2,7 @@
 Description=HP OmniBook privileged control listener
 
 BindsTo=omnibook-control.socket
-After=omnibook-control.socket omnibook-charge-limit.service
+After=omnibook-control.socket omnibook-fan-curves.service omnibook-charge-limit.service
 
 [Service]
 ExecStart=/usr/local/lib/omnibook-fan-curves/curve-python /usr/local/lib/omnibook-fan-curves/control_runner.py listen
