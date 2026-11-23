@@ -10,3 +10,20 @@ modules.order
 .tmp_versions/
 result
 result-*
+
+# Local firmware dumps and HP companion captures
+hp-app-*/
+*.[eE][vV][tT][xX]
+*.[aA][mM][lL]
+*.[fF][dD]
+*.[rR][oO][mM]
+DSDT*.dsl
+SSDT*.dsl
+
+# Local credentials and signing keys
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
