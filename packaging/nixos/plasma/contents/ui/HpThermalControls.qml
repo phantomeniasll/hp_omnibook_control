@@ -32,6 +32,7 @@ ColumnLayout {
         { key: "balanced", label: i18n("Balanced") },
         { key: "performance", label: i18n("Performance") }
     ]
+    readonly property bool customCurveActive: modes.some(mode => mode.key === activeCurve)
 
     spacing: Kirigami.Units.smallSpacing
 
@@ -128,7 +129,7 @@ ColumnLayout {
                 Layout.fillWidth: true
                 text: modelData.label
                 enabled: !root.pendingCommand && root.hpModes.includes(modelData.key)
-                highlighted: modelData.key === root.activeMode
+                highlighted: !root.customCurveActive && !root.boostActive && modelData.key === root.activeMode
                 font.bold: highlighted
                 icon.name: highlighted ? "emblem-default" : ""
                 onClicked: if (modelData.key !== root.activeMode) root.runRequest("set " + modelData.key)
@@ -162,7 +163,7 @@ ColumnLayout {
                 Layout.fillWidth: true
                 text: modelData.label
                 enabled: !root.pendingCommand && root.activeCurve !== "unavailable"
-                highlighted: modelData.key === root.activeCurve
+                highlighted: !root.boostActive && modelData.key === root.activeCurve
                 font.bold: highlighted
                 icon.name: highlighted ? "emblem-default" : ""
                 onClicked: if (modelData.key !== root.activeCurve) root.runRequest("curve " + modelData.key)
@@ -172,7 +173,7 @@ ColumnLayout {
         PlasmaComponents.Button {
             Layout.fillWidth: true
             enabled: !root.pendingCommand && root.activeCurve !== "unavailable"
-            highlighted: root.activeCurve === "auto"
+            highlighted: !root.boostActive && root.activeCurve === "auto"
             font.bold: highlighted
             icon.name: highlighted ? "emblem-default" : ""
             text: i18n("HP default")
