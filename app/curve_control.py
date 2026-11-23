@@ -23,6 +23,7 @@ STATUS_HEARTBEAT = 5
 STATUS_MAX_AGE = 15
 MODULE = Path("/sys/module/omnibook_fan_probe")
 PARAM = MODULE / "parameters"
+HP_MODE_FALLBACK = PARAM / "hp_mode"
 ACPI_DEVICES = Path("/sys/bus/acpi/devices")
 RPM = ACPI_DEVICES / "PNP0C0B:00" / "fan_speed_rpm"
 KEYS = ("quiet", "balanced", "cool", "performance")
@@ -313,9 +314,20 @@ def read_hp_mode():
     device = hp_profile_device()
     if device is not None:
         try:
-            return (device / "profile").read_text().strip(), (device / "choices").read_text().split()
+            choices = (device / "choices").read_text().split()
         except OSError:
-            pass
+            choices = ()
+        if choices:
+            try:
+                return (device / "profile").read_text().strip(), choices
+            except OSError:
+                pass
+            try:
+                mode = HP_MODE_FALLBACK.read_text().strip()
+                if mode in choices:
+                    return mode, choices
+            except OSError:
+                pass
     return None, ()
 
 
@@ -368,6 +380,8 @@ def main(args):
         if not load_status():
             raise OSError("The background fan service is unavailable.")
         change_boost(args == ["boost"])
+    elif args == ["load-driver"]:
+        ensure_module()
     elif args == ["run"]:
         with (STATE / "config.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)

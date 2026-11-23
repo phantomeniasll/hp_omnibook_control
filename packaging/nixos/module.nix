@@ -77,6 +77,7 @@ in {
       unitConfig.ConditionArchitecture = "x86-64";
       serviceConfig = {
         ExecStart = "${app}/curve-python ${app}/curve_control.py run";
+        ExecStartPre = "-${app}/curve-python ${app}/curve_control.py load-driver";
         StateDirectory = "omnibook-fan-curves";
         StateDirectoryMode = "0755";
         RuntimeDirectory = "omnibook-fan-curves";

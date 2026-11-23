@@ -8,7 +8,9 @@
 #include <linux/jiffies.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/slab.h>
 #include <linux/suspend.h>
+#include <linux/wmi.h>
 #include <linux/workqueue.h>
 
 #include "omnibook-acpi.h"
@@ -28,6 +30,19 @@
 #define MIN_CURVE_RPM 3000
 #define CURVE_LEASE_SECONDS 6
 #define SPINUP_GRACE (5 * HZ)
+#define HPWMI_BIOS_GUID "5FB7F034-2C63-45E9-BE91-3D44E2C707E4"
+#define HPWMI_BIOS_SIGNATURE 0x55434553U
+#define HPWMI_READ 1
+#define HPWMI_THERMAL_PROFILE_QUERY 0x4c
+#define HPWMI_METHOD_OUT4 2
+
+struct omnibook_hp_bios_args {
+	u32 signature;
+	u32 command;
+	u32 commandtype;
+	u32 datasize;
+	u8 data[128];
+};
 
 static acpi_handle pci0;
 static bool write_verified;
@@ -147,6 +162,76 @@ static int handoff_get(char *buffer, const struct kernel_param *parameter)
 
 static const struct kernel_param_ops handoff_ops = { .get = handoff_get };
 module_param_cb(handoff, &handoff_ops, NULL, 0444);
+
+static int hp_wmi_read_thermal_mode(u32 insize)
+{
+	struct omnibook_hp_bios_args *args;
+	struct acpi_buffer input;
+	struct acpi_buffer output = { ACPI_ALLOCATE_BUFFER, NULL };
+	const union acpi_object *reply;
+	acpi_status status;
+	int mode = -EIO;
+
+	args = kzalloc(sizeof(*args), GFP_KERNEL);
+	if (!args)
+		return -ENOMEM;
+
+	args->signature = HPWMI_BIOS_SIGNATURE;
+	args->command = HPWMI_READ;
+	args->commandtype = HPWMI_THERMAL_PROFILE_QUERY;
+	args->datasize = insize;
+
+	input.length = sizeof(*args);
+	input.pointer = args;
+
+	status = wmi_evaluate_method(HPWMI_BIOS_GUID, 0, HPWMI_METHOD_OUT4,
+				     &input, &output);
+	kfree(args);
+	if (ACPI_FAILURE(status))
+		return -EIO;
+
+	reply = output.pointer;
+	if (reply && reply->type == ACPI_TYPE_BUFFER &&
+	    reply->buffer.length >= 12 && reply->buffer.pointer) {
+		u32 ret_code;
+
+		memcpy(&ret_code, reply->buffer.pointer + 4, sizeof(ret_code));
+		if (!ret_code)
+			mode = reply->buffer.pointer[8];
+	}
+	kfree(output.pointer);
+	return mode;
+}
+
+static int hp_mode_get(char *buffer, const struct kernel_param *parameter)
+{
+	static const char *const modes[] = {
+		[0] = "performance",
+		[1] = "balanced",
+		[2] = "cool",
+		[3] = "quiet",
+	};
+	bool available;
+	int mode;
+
+	mutex_lock(&fan_lock);
+	available = ready && !suspended;
+	mutex_unlock(&fan_lock);
+	if (!available || !wmi_has_guid(HPWMI_BIOS_GUID))
+		return -ENODEV;
+
+	mode = hp_wmi_read_thermal_mode(4);
+	if (mode < 0)
+		mode = hp_wmi_read_thermal_mode(0);
+	if (mode < 0)
+		return mode;
+	if (mode >= ARRAY_SIZE(modes))
+		return -EINVAL;
+	return sysfs_emit(buffer, "%s\n", modes[mode]);
+}
+
+static const struct kernel_param_ops hp_mode_ops = { .get = hp_mode_get };
+module_param_cb(hp_mode, &hp_mode_ops, NULL, 0444);
 
 /* Hold a module reference from the first attempted write through verified restore. */
 static int restore_fan(void)

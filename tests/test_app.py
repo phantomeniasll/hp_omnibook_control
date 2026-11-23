@@ -76,6 +76,23 @@ class CurveControlTests(unittest.TestCase):
                 (alt / "fan_speed_rpm").write_text("3200\n")
                 self.assertEqual(curve_control.read_fan_rpm(), 3200)
 
+    def test_read_hp_mode_fallback_on_unreadable_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            device = root / "platform-profile-1"
+            device.mkdir()
+            (device / "choices").write_text("cool quiet balanced performance\n")
+            fallback = root / "hp_mode"
+            fallback.write_text("balanced\n")
+            with mock.patch.object(curve_control, "hp_profile_device", return_value=device), \
+                 mock.patch.object(curve_control, "HP_MODE_FALLBACK", fallback):
+                self.assertEqual(
+                    curve_control.read_hp_mode(),
+                    ("balanced", ["cool", "quiet", "balanced", "performance"]),
+                )
+                fallback.write_text("unknown\n")
+                self.assertEqual(curve_control.read_hp_mode(), (None, ()))
+
 
 class BatteryLimitTests(unittest.TestCase):
     def test_check_settings(self):
@@ -235,6 +252,8 @@ class MintAppletMetadataTests(unittest.TestCase):
         self.assertEqual(meta["uuid"], "omnibook-thermal@omnibook")
         self.assertTrue((meta_path.parent / "applet.js").is_file())
         self.assertTrue((meta_path.parent / "stylesheet.css").is_file())
+        self.assertTrue((meta_path.parent / "omnibook-fan-symbolic.svg").is_file())
+        self.assertTrue((meta_path.parent / "icon.png").is_file())
 
 
 if __name__ == "__main__":

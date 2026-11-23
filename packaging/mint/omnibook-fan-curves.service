@@ -3,6 +3,7 @@ Description=HP OmniBook custom fan curves
 After=systemd-modules-load.service
 
 [Service]
+ExecStartPre=-/usr/local/lib/omnibook-fan-curves/curve-python /usr/local/lib/omnibook-fan-curves/curve_control.py load-driver
 ExecStart=/usr/local/lib/omnibook-fan-curves/curve-python /usr/local/lib/omnibook-fan-curves/curve_control.py run
 StateDirectory=omnibook-fan-curves
 RuntimeDirectory=omnibook-fan-curves

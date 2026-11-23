@@ -51,7 +51,7 @@ function runCommandAsync(argv, callback) {
 class OmnibookThermalApplet extends Applet.IconApplet {
     constructor(metadata, orientation, panelHeight, instanceId) {
         super(orientation, panelHeight, instanceId);
-        this.set_applet_icon_symbolic_name("temperature-symbolic");
+        this.set_applet_icon_symbolic_path(`${metadata.path}/omnibook-fan-symbolic.svg`);
         this.set_applet_tooltip("HP Thermal & Battery");
 
         this._activeMode = "";
