@@ -52,6 +52,8 @@ EOF
       substituteInPlace "$plasmoid/contents/ui/HpThermalControls.qml" \
         --replace-fail @THERMAL_HELPER@ "$app/thermal"
       substituteInPlace "$plasmoid/contents/ui/HpThermalControls.qml" \
+        --replace-fail @CHARGE_HELPER@ "$out/bin/hp-charge-limit"
+      substituteInPlace "$plasmoid/contents/ui/HpThermalControls.qml" \
         --replace-fail 'helper.substring(0, helper.lastIndexOf("/")) + "/open-curve-editor"' \
           "\"$out/bin/hp-fan-curves\""
     ''}

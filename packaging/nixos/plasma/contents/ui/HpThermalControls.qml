@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
@@ -9,7 +10,9 @@ ColumnLayout {
 
     required property bool monitoring
     readonly property string helper: "@THERMAL_HELPER@"
+    readonly property string chargeHelper: "@CHARGE_HELPER@"
     readonly property string statusCommand: helper + " status"
+    readonly property string chargeStatusCommand: chargeHelper + " status"
     readonly property string editorCommand: helper.substring(0, helper.lastIndexOf("/")) + "/open-curve-editor"
     property string activeMode: ""
     property var hpModes: []
@@ -19,6 +22,10 @@ ColumnLayout {
     property string activeCurve: "unavailable"
     property string pendingCommand: ""
     property string message: ""
+    property var charge: ({})
+    property bool chargeEdited: false
+    property bool pendingChargeSave: false
+    readonly property bool chargeAvailable: typeof charge.online === "boolean"
     readonly property var modes: [
         { key: "cool", label: i18n("Cool") },
         { key: "quiet", label: i18n("Quiet") },
@@ -30,13 +37,15 @@ ColumnLayout {
 
     function refresh() {
         runner.connectSource(statusCommand);
+        runner.connectSource(chargeStatusCommand);
     }
 
-    function runRequest(request) {
+    function runRequest(request, commandHelper, saveCharge) {
         if (pendingCommand)
             return;
         message = "";
-        pendingCommand = helper + " " + request;
+        pendingChargeSave = saveCharge === true;
+        pendingCommand = (commandHelper || helper) + " " + request;
         runner.connectSource(pendingCommand);
     }
 
@@ -80,10 +89,23 @@ ColumnLayout {
                     root.temperatures = [];
                     root.hpModes = [];
                 }
+            } else if (source === root.chargeStatusCommand) {
+                try {
+                    root.charge = JSON.parse(String(data.stdout || "{}"));
+                    if (root.chargeAvailable && !root.chargeEdited) {
+                        chargeLimit.value = root.charge.limit;
+                        chargeHysteresis.value = root.charge.hysteresis;
+                    }
+                } catch (error) {
+                    root.charge = {};
+                }
             } else if (source === root.pendingCommand) {
                 if (data["exit code"] !== 0) {
-                    root.message = String(data.stderr || "").trim() || i18n("Could not change the thermal settings.");
+                    root.message = String(data.stderr || "").trim() || i18n("Could not apply the setting.");
+                } else if (root.pendingChargeSave) {
+                    root.chargeEdited = false;
                 }
+                root.pendingChargeSave = false;
                 root.pendingCommand = "";
                 root.refresh();
             }
@@ -159,8 +181,76 @@ ColumnLayout {
     PlasmaComponents.Label {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
-        text: root.pendingCommand ? i18n("Applying thermal setting…")
+        text: root.pendingCommand ? i18n("Applying setting…")
             : root.message || (root.fanRpm ? i18n("Fan speed: %1 RPM", root.fanRpm) : i18n("Fan speed unavailable"))
+    }
+
+    ColumnLayout {
+        Layout.fillWidth: true
+        visible: root.chargeAvailable
+        enabled: !root.pendingCommand
+
+        RowLayout {
+            Layout.fillWidth: true
+            PlasmaComponents.Label {
+                text: i18n("Battery Charging")
+                font.bold: true
+                Layout.fillWidth: true
+            }
+            PlasmaComponents.Button {
+                text: root.charge.enabled ? i18n("Disable Limit") : i18n("Enable Limit")
+                onClicked: root.runRequest(root.charge.enabled ? "disable" : "enable", root.chargeHelper)
+            }
+        }
+
+        GridLayout {
+            columns: 2
+            Layout.fillWidth: true
+
+            PlasmaComponents.Label { text: i18n("Stop at (%)") }
+            QQC2.SpinBox {
+                id: chargeLimit
+                Layout.fillWidth: true
+                from: 2
+                to: 100
+                value: 80
+                editable: true
+                Accessible.name: i18n("Stop charging percentage")
+                onValueModified: root.chargeEdited = true
+            }
+
+            PlasmaComponents.Label { text: i18n("Hysteresis (points)") }
+            QQC2.SpinBox {
+                id: chargeHysteresis
+                Layout.fillWidth: true
+                from: 1
+                to: chargeLimit.value - 1
+                value: 5
+                editable: true
+                Accessible.name: i18n("Charge hysteresis in percentage points")
+                onValueModified: root.chargeEdited = true
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                text: i18n("Resume at %1%", chargeLimit.value - chargeHysteresis.value)
+            }
+            PlasmaComponents.Button {
+                text: i18n("Save")
+                enabled: root.chargeEdited
+                onClicked: root.runRequest("set " + chargeLimit.value + " " + chargeHysteresis.value,
+                                           root.chargeHelper, true)
+            }
+        }
+
+        PlasmaComponents.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            text: root.charge.state || ""
+        }
     }
 
     GridLayout {
