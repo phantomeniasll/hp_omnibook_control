@@ -28,5 +28,8 @@ rm -f "/etc/systemd/system/$service" "/etc/systemd/system/$battery_service" \
 if [ -d /usr/local/lib/omnibook-fan-curves ]; then
     rm -r /usr/local/lib/omnibook-fan-curves
 fi
+if [ -d /usr/share/cinnamon/applets/omnibook-thermal@omnibook ]; then
+    rm -r /usr/share/cinnamon/applets/omnibook-thermal@omnibook
+fi
 systemctl daemon-reload
 printf 'Removed the service and app. Saved curves are retained in /var/lib/omnibook-fan-curves.\n'

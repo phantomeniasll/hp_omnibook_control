@@ -1,0 +1,7 @@
+{
+  "uuid": "omnibook-thermal@omnibook",
+  "name": "HP Thermal & Battery",
+  "description": "Control HP OmniBook fan curves, thermal modes, Fan Boost, and battery charge limits",
+  "icon": "temperature-symbolic",
+  "max-instances": 1
+}

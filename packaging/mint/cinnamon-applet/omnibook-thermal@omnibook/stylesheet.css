@@ -1,0 +1,64 @@
+.omnibook-popup {
+    padding: 8px 12px;
+    spacing: 6px;
+    min-width: 310px;
+    max-width: 360px;
+}
+
+.omnibook-heading {
+    font-weight: bold;
+    padding-top: 4px;
+}
+
+.omnibook-text {
+    padding-bottom: 2px;
+}
+
+.omnibook-row {
+    spacing: 6px;
+}
+
+.omnibook-button {
+    padding: 5px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(128, 128, 128, 0.45);
+    background-color: rgba(128, 128, 128, 0.12);
+}
+
+.omnibook-button:hover {
+    background-color: rgba(128, 128, 128, 0.24);
+}
+
+.omnibook-button:insensitive {
+    opacity: 0.45;
+}
+
+.omnibook-button-selected {
+    border: 1px solid rgba(53, 132, 228, 0.9);
+    background-color: rgba(53, 132, 228, 0.28);
+    font-weight: bold;
+}
+
+.omnibook-button-selected:hover {
+    background-color: rgba(53, 132, 228, 0.36);
+}
+
+.omnibook-entry {
+    width: 46px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(128, 128, 128, 0.55);
+}
+
+.omnibook-temp-row {
+    spacing: 12px;
+}
+
+.omnibook-temp-cell {
+    spacing: 6px;
+}
+
+.omnibook-message {
+    padding-top: 2px;
+    font-style: italic;
+}

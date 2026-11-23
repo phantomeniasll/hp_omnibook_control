@@ -91,6 +91,10 @@ if [ ! -f "$headers/Makefile" ]; then
     printf 'Install matching kernel headers: sudo apt install linux-headers-%s\n' "$release" >&2
     exit 1
 fi
+if ! command -v iasl >/dev/null 2>&1; then
+    printf 'Install ACPICA iASL first: sudo apt install acpica-tools\n' >&2
+    exit 1
+fi
 umask 022
 make -C "$headers" M="$base/driver" modules
 module="$base/driver/omnibook-fan-probe.ko"

@@ -19,6 +19,8 @@ listener=omnibook-control.service
 legacy=omnibook-control@.service
 desktop=/usr/local/share/applications/hp-fan-curves.desktop
 cli=/usr/local/bin/hp-charge-limit
+applet_uuid=omnibook-thermal@omnibook
+applet_dest="/usr/share/cinnamon/applets/$applet_uuid"
 fan_link="$units/multi-user.target.wants/$fan"
 charge_link="$units/multi-user.target.wants/$charge"
 socket_link="$units/sockets.target.wants/$socket"
@@ -46,6 +48,11 @@ cleanup() {
             rm -rf -- "$dest" && mv -T -- "$staging/previous-app" "$dest" || rollback_ok=false
         elif [ ! -e "$staging/new-app" ]; then
             rm -rf -- "$dest" || rollback_ok=false
+        fi
+        if [ -e "$staging/previous-applet" ] || [ -L "$staging/previous-applet" ]; then
+            rm -rf -- "$applet_dest" && mv -T -- "$staging/previous-applet" "$applet_dest" || rollback_ok=false
+        elif [ ! -e "$staging/new-applet" ]; then
+            rm -rf -- "$applet_dest" || rollback_ok=false
         fi
         for file in $managed_files; do
             rm -f -- "$file" || rollback_ok=false
@@ -89,7 +96,9 @@ if [ "$#" -eq 4 ]; then
     stage_module "$3" "$charge_module" "$4" omnibook_charge_control
 fi
 install -m644 "$source/app/"*.py "$source/app/curves.json" "$next/"
-install -m755 "$source/app/curve-python" "$source/app/open-curve-editor" "$next/"
+install -m755 "$source/app/curve-python" "$source/app/open-curve-editor" "$source/app/thermal" "$next/"
+install -d -m755 "$staging/new-applet"
+install -m644 "$source/packaging/mint/cinnamon-applet/$applet_uuid/"* "$staging/new-applet/"
 install -m644 "$source/packaging/mint/$fan" "$source/packaging/mint/$charge" \
     "$source/packaging/mint/$socket" "$source/packaging/mint/$listener" "$staging/units/"
 install -m644 "$source/packaging/mint/hp-fan-curves.desktop" "$staging/desktop"
@@ -109,6 +118,17 @@ done
 systemctl is-active --quiet "$fan" && old_fan=true
 systemctl is-active --quiet "$charge" && old_charge=true
 systemctl is-active --quiet "$socket" && old_socket=true
+
+if [ -r /sys/module/omnibook_fan_probe/parameters/handoff ]; then
+    for attempt in 1 2 3 4 5; do
+        if [ "$(cat /sys/module/omnibook_fan_probe/parameters/handoff)" != recovering ]; then break; fi
+        sleep 1
+    done
+    if [ "$(cat /sys/module/omnibook_fan_probe/parameters/handoff)" = recovering ]; then
+        printf 'Fan driver is still recovering automatic control; try the upgrade again shortly.\n' >&2
+        exit 1
+    fi
+fi
 
 swapping=true
 if "$old_socket"; then systemctl stop "$socket"; fi
@@ -131,6 +151,11 @@ if [ -e "$dest" ] || [ -L "$dest" ]; then
     mv -T -- "$dest" "$staging/previous-app"
 fi
 mv -T -- "$next" "$dest"
+install -d -m755 /usr/share/cinnamon/applets
+if [ -e "$applet_dest" ] || [ -L "$applet_dest" ]; then
+    mv -T -- "$applet_dest" "$staging/previous-applet"
+fi
+mv -T -- "$staging/new-applet" "$applet_dest"
 groupadd --force --system omnibook-control
 install -d -m755 /usr/local/share/applications /usr/local/bin \
     "$units/multi-user.target.wants" "$units/sockets.target.wants"
@@ -165,4 +190,4 @@ done
 if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
     usermod -aG omnibook-control "$SUDO_USER"
 fi
-printf 'Sign out and back in to activate group access, then open HP Fan Curves from the Cinnamon menu.\n'
+printf 'Sign out and back in to activate group access, then open HP Fan Curves from the Cinnamon menu or add the HP Thermal & Battery panel applet.\n'
