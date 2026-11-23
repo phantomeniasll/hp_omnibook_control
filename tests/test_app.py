@@ -51,6 +51,31 @@ class CurveControlTests(unittest.TestCase):
         self.assertEqual(curve_control.curve_rpm(points, 65), 4000)
         self.assertEqual(curve_control.curve_rpm(points, 90), 4500)
 
+    def test_load_status_detects_staleness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            status_file = Path(tmp) / "status.json"
+            status_file.write_text(json.dumps({
+                "profile": "auto",
+                "state": "Automatic",
+                "updated_at": 50.0,
+            }))
+            with mock.patch.object(curve_control, "STATUS", status_file):
+                with mock.patch.object(curve_control, "boottime", return_value=58.0):
+                    self.assertEqual(curve_control.load_status()["profile"], "auto")
+                with mock.patch.object(curve_control, "boottime", return_value=90.0):
+                    self.assertEqual(curve_control.load_status(), {})
+
+    def test_read_fan_rpm_fallback_and_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            devices = Path(tmp)
+            with mock.patch.object(curve_control, "ACPI_DEVICES", devices), \
+                 mock.patch.object(curve_control, "RPM", devices / "PNP0C0B:00" / "fan_speed_rpm"):
+                self.assertIsNone(curve_control.read_fan_rpm())
+                alt = devices / "PNP0C0B:01"
+                alt.mkdir()
+                (alt / "fan_speed_rpm").write_text("3200\n")
+                self.assertEqual(curve_control.read_fan_rpm(), 3200)
+
 
 class BatteryLimitTests(unittest.TestCase):
     def test_check_settings(self):

@@ -3,6 +3,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import select
 import signal
 import subprocess
 import sys
@@ -18,12 +19,31 @@ CONFIG = STATE / "curves.json"
 STATUS = RUNTIME / "status.json"
 BOOST = RUNTIME / "boost-until"
 BOOST_DURATION = 30
+STATUS_HEARTBEAT = 5
+STATUS_MAX_AGE = 15
 MODULE = Path("/sys/module/omnibook_fan_probe")
 PARAM = MODULE / "parameters"
-RPM = Path("/sys/bus/acpi/devices/PNP0C0B:00/fan_speed_rpm")
+ACPI_DEVICES = Path("/sys/bus/acpi/devices")
+RPM = ACPI_DEVICES / "PNP0C0B:00" / "fan_speed_rpm"
 KEYS = ("quiet", "balanced", "cool", "performance")
 MIN_RPM, MAX_RPM = 3000, 4500
 BIN = Path(os.environ.get("OMNIBOOK_KMOD_BIN", "/usr/sbin"))
+
+
+def boottime():
+    return time.clock_gettime(time.CLOCK_BOOTTIME)
+
+
+def read_fan_rpm():
+    candidates = [RPM]
+    if not RPM.is_file():
+        candidates.extend(sorted(ACPI_DEVICES.glob("PNP0C0B:*/fan_speed_rpm")))
+    for path in candidates:
+        try:
+            return int(path.read_text())
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def atomic_write(path, data):
@@ -67,9 +87,17 @@ def load_config():
 
 def load_status():
     try:
-        return json.loads(STATUS.read_text())
+        status = json.loads(STATUS.read_text())
     except (OSError, ValueError):
         return {}
+    if not isinstance(status, dict):
+        return {}
+    updated_at = status.get("updated_at")
+    if isinstance(updated_at, (int, float)):
+        age = boottime() - updated_at
+        if not -5 <= age <= STATUS_MAX_AGE:
+            return {}
+    return status
 
 
 def change_config(command, argument):
@@ -157,7 +185,7 @@ def change_boost(start):
         if not start:
             BOOST.unlink(missing_ok=True)
             return
-        now = time.monotonic()
+        now = boottime()
         if now < boost_deadline():
             raise OSError("Fan Boost is already running.")
         atomic_write(BOOST, json.dumps({"until": now + BOOST_DURATION}) + "\n")
@@ -167,23 +195,32 @@ def run():
     stopping = False
     hot = False
     last_target = 0
+    last_written_status = None
+    last_write_time = -STATUS_HEARTBEAT
+    wake_read, wake_write = os.pipe()
+    os.set_blocking(wake_read, False)
+    os.set_blocking(wake_write, False)
 
     def stop(_signum, _frame):
         nonlocal stopping
         stopping = True
+        try:
+            os.write(wake_write, b"\0")
+        except OSError:
+            pass
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     try:
         while not stopping:
-            now = time.monotonic()
+            now = boottime()
             status = {"profile": "auto", "boost": False, "target": 0,
                       "temperature": None, "rpm": None, "state": "Automatic"}
             try:
                 config = load_config()
                 status["profile"] = profile = config["active"]
                 status["boost"] = boost_requested = boost_deadline() > now
-                status["rpm"] = int(RPM.read_text())
+                status["rpm"] = read_fan_rpm()
                 cpu = sensor(Path("/sys/class/hwmon"), "name", "k10temp", "temp1_input")
                 acpi = sensor(Path("/sys/class/thermal"), "type", "acpitz", "temp")
                 status["temperature"] = round(cpu / 1000, 1)
@@ -213,11 +250,15 @@ def run():
                             errno.EALREADY: "Firmware fan speed is already sufficient",
                             errno.EAGAIN: "Checking firmware fan speed",
                             errno.EBUSY: "Firmware fan control unavailable",
+                            errno.ERANGE: "Firmware cooling",
                             errno.EOPNOTSUPP: "Firmware did not confirm fan control",
                         }
                         if error.errno not in reasons:
                             raise
-                        firmware_control()
+                        try:
+                            firmware_control()
+                        except OSError:
+                            pass
                         status["state"] = reasons[error.errno]
                         last_target = 0
                 else:
@@ -232,10 +273,24 @@ def run():
                 status["state"] = "Firmware control: " + str(error)
             if fan_recovering():
                 status.update(state="Restoring HP fan control", target=0)
-            atomic_write(STATUS, json.dumps(status) + "\n")
-            time.sleep(1)
+            if status != last_written_status or now - last_write_time >= STATUS_HEARTBEAT:
+                payload = {**status, "updated_at": round(now, 3)}
+                atomic_write(STATUS, json.dumps(payload) + "\n")
+                last_written_status = status
+                last_write_time = now
+            if not stopping:
+                try:
+                    select.select([wake_read], [], [], 1)
+                except InterruptedError:
+                    pass
     finally:
-        firmware_control()
+        os.close(wake_read)
+        os.close(wake_write)
+        try:
+            firmware_control()
+        except OSError:
+            pass
+        STATUS.unlink(missing_ok=True)
 
 
 def hp_profile_device():
@@ -287,10 +342,8 @@ def main(args):
         if fan_recovering():
             status.update(state="Restoring HP fan control", target=0)
         print(mode or "unavailable")
-        try:
-            print(int(RPM.read_text()))
-        except (OSError, ValueError):
-            print()
+        rpm = read_fan_rpm()
+        print("" if rpm is None else rpm)
         print("Y" if status.get("boost") else "N")
         print(status.get("profile", "unavailable"))
         print(json.dumps(readings(), ensure_ascii=True))
@@ -306,7 +359,7 @@ def main(args):
             raise OSError("Install the background fan service first.")
         change_config(*args)
     elif args in (["boost"], ["stop-boost"]):
-        if not STATUS.is_file():
+        if not load_status():
             raise OSError("The background fan service is unavailable.")
         change_boost(args == ["boost"])
     elif args == ["run"]:

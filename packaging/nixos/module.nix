@@ -81,6 +81,7 @@ in {
         StateDirectoryMode = "0755";
         RuntimeDirectory = "omnibook-fan-curves";
         RuntimeDirectoryMode = "0755";
+        RuntimeDirectoryPreserve = "yes";
         Restart = "on-failure";
         RestartSec = 3;
         TimeoutStopSec = 10;
