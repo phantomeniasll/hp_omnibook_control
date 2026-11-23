@@ -18,11 +18,11 @@ Installation targets Linux Mint 22 Cinnamon and builds a module for the currentl
 
 ```sh
 sudo apt update
-sudo apt install build-essential "linux-headers-$(uname -r)" kmod pkexec python3 python3-pyqt6
+sudo apt install build-essential "linux-headers-$(uname -r)" kmod python3 python3-pyqt6
 sh ./packaging/mint/install.sh
 ```
 
-The installer builds as your user, then requests administrator access to test the module and install the app and service. Keep the extracted folder for future kernel updates.
+The installer builds as your user, then requests administrator access to test the module and install the app and service. It grants the installing account access through the `omnibook-control` group. Sign out and back in once to activate the membership. The installed controls then work without password prompts. Keep the extracted folder for future kernel updates.
 
 Open **HP Fan Curves** from the Cinnamon application menu. Right-click the menu result and choose **Add to panel** if you want quick access. The app can be closed while the service runs.
 
@@ -52,6 +52,6 @@ Removal stops the service and unloads the driver. Saved curves remain at `/var/l
 
 ## Battery charging
 
-When the charge module was built alongside the fan module, the installer also starts the charge-limit service. Use **Battery charging** in the editor or run `sudo hp-charge-limit set 80 5` and `sudo hp-charge-limit enable`. On Secure Boot systems the charge module must be signed separately before it can load.
+When the charge module was built alongside the fan module, the installer also starts the charge-limit service. Use **Battery charging** in the editor or run `hp-charge-limit set 80 5` and `hp-charge-limit enable`. On Secure Boot systems the charge module must be signed separately before it can load.
 
 See [power management](power-management.md) for HP Battery Care, Linux charge thresholds, and the separate research probe.

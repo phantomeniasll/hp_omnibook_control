@@ -143,7 +143,8 @@ def main(args):
         print(json.dumps(status()))
         return
     if os.geteuid() != 0:
-        raise PermissionError("Administrator authentication is required.")
+        from control_runner import request
+        request("battery", args)
     if args == ["run"]:
         run()
     else:

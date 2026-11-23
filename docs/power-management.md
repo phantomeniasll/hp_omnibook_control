@@ -17,10 +17,10 @@ On 8DA8/F.11, a controlled test at 75% changed the battery from Charging at abou
 The optional Linux service uses these two verified actions. While Linux is running on AC, it pauses at the configured limit and resumes at the limit minus the hysteresis, measured in percentage points. It preserves the current state between those levels. The defaults are 80% and 5 percentage points, so charging resumes at 75%. It returns control to HP when unplugged, stopped, or preparing for suspend. The driver also expires an unrenewed pause after 60 seconds. Linux must be awake and running to enforce the ceiling. The firmware can charge beyond 80% while the laptop is asleep or powered off.
 
 ```sh
-sudo hp-charge-limit set 80 5
-sudo hp-charge-limit enable
+hp-charge-limit set 80 5
+hp-charge-limit enable
 hp-charge-limit status
-sudo hp-charge-limit disable
+hp-charge-limit disable
 ```
 
 The same settings and toggle appear in the desktop editor while the service is running. See the [NixOS setup](nixos.md) and [Mint setup](mint.md) for service activation.

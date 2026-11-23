@@ -14,6 +14,7 @@ A desktop editor and background fan controller for the **HP OmniBook X Flip 16-a
 - **Fan Boost** requests up to 4,500 RPM for 30 seconds.
 - The editor shows live CPU, GPU, SSD, system, and Wi-Fi temperatures where the kernel exposes them.
 - The separate HP firmware buttons use the kernel's readable HP profile interface when available.
+- A root-owned service handles control requests from authorized local users without per-button password prompts.
 - The optional Linux charge limiter has editable stop and resume thresholds. It defaults to stopping at 80% and resuming at 75%.
 - The [power management notes](docs/power-management.md) cover charge thresholds and the read-only battery research tool.
 - The [HP companion notes](docs/hp-companion.md) map the Windows app's other features to Linux interfaces and include a Windows capture tool.

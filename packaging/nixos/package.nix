@@ -28,7 +28,6 @@ stdenv.mkDerivation {
     install -m755 app/curve-python app/open-curve-editor app/thermal "$app/"
     substituteInPlace "$app/curve-python" --replace-fail /usr/bin/python3 ${python}/bin/python3
     substituteInPlace "$app/curve_control.py" --replace-fail '"/usr/sbin"' '"${kmod}/bin"'
-    substituteInPlace "$app/curve_editor.py" --replace-fail '/usr/bin/pkexec' '/run/wrappers/bin/pkexec'
     install -Dm644 "${driver}/lib/modules/${driver.kernelRelease}/omnibook-fan-probe.ko" \
       "$app/${driver.kernelRelease}/omnibook-fan-probe.ko"
     install -Dm644 "${driver}/lib/modules/${driver.kernelRelease}/omnibook-charge-control.ko" \

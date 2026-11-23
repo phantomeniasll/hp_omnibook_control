@@ -13,6 +13,7 @@ source=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 dest=/usr/local/lib/omnibook-fan-curves
 service=omnibook-fan-curves.service
 battery_service=omnibook-charge-limit.service
+socket=omnibook-control.socket
 charge_module=$(dirname -- "$1")/omnibook-charge-control.ko
 
 # Test module loading before installing anything. Curve mode starts in firmware automatic.
@@ -30,6 +31,9 @@ fi
 if systemctl is-active --quiet "$battery_service"; then
     systemctl stop "$battery_service"
 fi
+if systemctl is-active --quiet "$socket"; then
+    systemctl stop "$socket" 'omnibook-control@*.service'
+fi
 if [ -d /sys/module/omnibook_fan_probe ]; then
     rmmod omnibook_fan_probe
 fi
@@ -41,6 +45,12 @@ install -m 0644 "$source/app/"*.py "$source/app/curves.json" "$dest/"
 install -m 0755 "$source/app/"curve-python "$source/app/"open-curve-editor "$dest/"
 install -m 0644 "$1" "$dest/$release/omnibook-fan-probe.ko"
 install -m 0644 "$source/packaging/mint/$service" "/etc/systemd/system/$service"
+groupadd --force --system omnibook-control
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+    usermod -aG omnibook-control "$SUDO_USER"
+fi
+install -m 0644 "$source/packaging/mint/$socket" \
+    "$source/packaging/mint/omnibook-control@.service" /etc/systemd/system/
 install -m 0644 "$source/packaging/mint/hp-fan-curves.desktop" /usr/local/share/applications/
 if [ -f "$charge_module" ]; then
     install -m 0644 "$charge_module" "$dest/$release/omnibook-charge-control.ko"
@@ -48,9 +58,10 @@ if [ -f "$charge_module" ]; then
     install -m 0644 "$source/packaging/mint/$battery_service" "/etc/systemd/system/$battery_service"
 fi
 systemctl daemon-reload
+systemctl enable --now "$socket"
 systemctl enable --now "$service"
 if [ -f "$charge_module" ]; then
     systemctl enable --now "$battery_service"
 fi
 systemctl is-active "$service"
-printf 'Open HP Fan Curves from the Cinnamon menu.\n'
+printf 'Sign out and back in to activate group access, then open HP Fan Curves from the Cinnamon menu.\n'

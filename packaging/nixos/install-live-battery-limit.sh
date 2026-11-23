@@ -18,14 +18,29 @@ version=$(modinfo -F vermagic "$module")
 dest=/usr/local/lib/omnibook-charge-limit
 units=/usr/local/lib/systemd/system
 service=omnibook-charge-limit.service
-install -d -m755 "$dest/$release" "$units/multi-user.target.wants" /usr/local/bin \
+socket=omnibook-control.socket
+if systemctl is-active --quiet "$socket"; then
+    systemctl stop "$socket" 'omnibook-control@*.service'
+fi
+install -d -m755 "$dest/$release" "$units/multi-user.target.wants" \
+    "$units/sockets.target.wants" /usr/local/bin \
     /var/lib/omnibook-charge-limit
 install -m644 "$source/app/battery_limit.py" "$source/app/curve_control.py" \
-    "$source/app/temperature_status.py" "$dest/"
+    "$source/app/control_runner.py" "$source/app/temperature_status.py" \
+    "$source/app/curves.json" "$dest/"
 install -m644 "$module" "$dest/$release/omnibook-charge-control.ko"
 python_store=${python%/bin/*}
 ln -sfn "$python_store" /nix/var/nix/gcroots/omnibook-charge-limit-python
 sed -i 's|"/usr/sbin"|"/run/current-system/sw/bin"|' "$dest/curve_control.py"
+groupadd --force --system omnibook-control
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+    usermod -aG omnibook-control "$SUDO_USER"
+fi
+install -m644 "$source/packaging/mint/$socket" "$units/$socket"
+runner=omnibook-control@.service
+install -m644 "$source/packaging/mint/$runner" "$units/$runner"
+sed -i "s|/usr/local/lib/omnibook-fan-curves/curve-python /usr/local/lib/omnibook-fan-curves/control_runner.py|$python $dest/control_runner.py|" "$units/$runner"
+ln -sfn "../$socket" "$units/sockets.target.wants/$socket"
 
 cat > /usr/local/bin/hp-charge-limit <<EOF
 #!/bin/sh
@@ -52,7 +67,8 @@ WantedBy=multi-user.target
 EOF
 ln -sfn "../$service" "$units/multi-user.target.wants/$service"
 systemctl daemon-reload
+systemctl start "$socket"
 systemctl restart "$service"
 /usr/local/bin/hp-charge-limit enable
 systemctl is-active "$service"
-printf 'Charge limit enabled. Check it with /usr/local/bin/hp-charge-limit status.\n'
+printf 'Charge limit enabled. Sign out and back in to activate group access.\n'

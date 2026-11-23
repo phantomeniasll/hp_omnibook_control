@@ -1,0 +1,13 @@
+[Unit]
+Description=HP OmniBook control socket
+
+[Socket]
+ListenStream=/run/omnibook-control.sock
+SocketMode=0660
+SocketGroup=omnibook-control
+Accept=yes
+MaxConnections=16
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=HP OmniBook privileged control request
+
+[Service]
+ExecStart=/usr/local/lib/omnibook-fan-curves/curve-python /usr/local/lib/omnibook-fan-curves/control_runner.py serve
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+RuntimeMaxSec=10
+NoNewPrivileges=yes

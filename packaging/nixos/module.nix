@@ -10,11 +10,41 @@ in {
     enable = lib.mkEnableOption "HP OmniBook 8DA8 fan curves";
     plasmaWidget = lib.mkEnableOption "the optional Plasma 6 fan control widget";
     batteryLimit.enable = lib.mkEnableOption "the optional battery charge-limit service";
+    controlUsers = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = "Local users allowed to change fan and battery settings without a prompt.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
-    security.polkit.enable = lib.mkDefault true;
+    users.groups.omnibook-control.members = cfg.controlUsers;
     environment.systemPackages = [ package ] ++ lib.optional cfg.plasmaWidget pkgs.kdePackages.plasma5support;
+
+    systemd.sockets.omnibook-control = {
+      description = "HP OmniBook control socket";
+      wantedBy = [ "sockets.target" ];
+      socketConfig = {
+        ListenStream = "/run/omnibook-control.sock";
+        SocketMode = "0660";
+        SocketGroup = "omnibook-control";
+        Accept = true;
+        MaxConnections = 16;
+        RemoveOnStop = true;
+      };
+    };
+
+    systemd.services."omnibook-control@" = {
+      description = "HP OmniBook privileged control request";
+      serviceConfig = {
+        ExecStart = "${app}/curve-python ${app}/control_runner.py serve";
+        StandardInput = "socket";
+        StandardOutput = "socket";
+        StandardError = "journal";
+        RuntimeMaxSec = 10;
+        NoNewPrivileges = true;
+      };
+    };
 
     systemd.services.omnibook-fan-curves = {
       description = "HP OmniBook custom fan curves";

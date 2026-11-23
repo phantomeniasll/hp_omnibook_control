@@ -264,7 +264,8 @@ def main(args):
         print(json.dumps(readings(), ensure_ascii=True))
         print(json.dumps(choices))
     elif os.geteuid() != 0:
-        raise PermissionError("Administrator authentication is required.")
+        from control_runner import request
+        request("fan", args)
     elif len(args) == 2 and args[0] == "hp-mode":
         switch_hp_mode(args[1])
     elif len(args) == 2 and args[0] in ("save", "save-select", "select"):

@@ -1,5 +1,4 @@
 import json
-import os
 import sys
 
 try:
@@ -24,7 +23,6 @@ from battery_limit import STATUS as BATTERY_LIMIT_STATUS, status as battery_limi
 
 LABELS = {"auto": "Automatic", "quiet": "Quiet", "balanced": "Balanced",
           "cool": "Cool", "performance": "Performance"}
-PKEXEC = os.environ.get("OMNIBOOK_PKEXEC", "/usr/bin/pkexec")
 
 
 class CurveEditor(QDialog):
@@ -235,21 +233,20 @@ class CurveEditor(QDialog):
         self.status.setText(f'{LABELS[value["profile"]]}   ·   {temperature}   ·   {rpm}\n{value["state"]}')
 
     def command(self, operation, argument=None):
-        arguments = ["--disable-internal-agent", str(BASE / "curve-python"),
-                     str(BASE / "curve_control.py"), operation]
+        arguments = [str(BASE / "curve_control.py"), operation]
         if argument is not None:
             arguments.append(argument)
-        self.process.start(PKEXEC, arguments)
-        self.message.setText("Waiting for authorization…")
+        self.process.start(str(BASE / "curve-python"), arguments)
+        self.message.setText("Applying fan setting…")
         self.refresh()
 
     def switch_battery_limit(self):
         self.battery_command("disable" if battery_limit_status()["enabled"] else "enable")
 
     def battery_command(self, *operations):
-        self.process.start(PKEXEC, ["--disable-internal-agent", str(BASE / "curve-python"),
-                                    str(BASE / "battery_limit.py"), *operations])
-        self.message.setText("Waiting for authorization…")
+        self.process.start(str(BASE / "curve-python"),
+                           [str(BASE / "battery_limit.py"), *operations])
+        self.message.setText("Applying charging setting…")
         self.refresh()
 
     def save_profiles(self, apply):
@@ -269,7 +266,7 @@ class CurveEditor(QDialog):
     def command_finished(self, code, _status):
         error = self.process.readAllStandardError().data().decode(errors="replace").strip()
         self.message.setText("Updated." if code == 0 else
-                             "Authorization canceled." if code == 126 else error or "Could not apply the change.")
+                             error or "Could not apply the change.")
         self.refresh()
 
 

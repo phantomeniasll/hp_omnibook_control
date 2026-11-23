@@ -36,7 +36,7 @@ ColumnLayout {
         if (pendingCommand)
             return;
         message = "";
-        pendingCommand = "/run/wrappers/bin/pkexec --disable-internal-agent " + helper + " " + request;
+        pendingCommand = helper + " " + request;
         runner.connectSource(pendingCommand);
     }
 
@@ -81,9 +81,7 @@ ColumnLayout {
                     root.hpModes = [];
                 }
             } else if (source === root.pendingCommand) {
-                if (data["exit code"] === 126) {
-                    root.message = i18n("Authentication was canceled.");
-                } else if (data["exit code"] !== 0) {
+                if (data["exit code"] !== 0) {
                     root.message = String(data.stderr || "").trim() || i18n("Could not change the thermal settings.");
                 }
                 root.pendingCommand = "";
