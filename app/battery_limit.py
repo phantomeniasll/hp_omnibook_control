@@ -13,6 +13,7 @@ from curve_control import BASE, BIN, atomic_write
 BATTERY = Path("/sys/class/power_supply/BAT0")
 AC = Path("/sys/class/power_supply/ADP1/online")
 PARAM = Path("/sys/module/omnibook_charge_control/parameters/inhibit")
+NATIVE_LIMIT = PARAM.with_name("native_limit")
 PREFERENCE = Path("/var/lib/omnibook-charge-limit/enabled")
 CONFIG = PREFERENCE.with_name("settings.json")
 STATUS = Path("/run/omnibook-charge-limit/status.json")
@@ -91,6 +92,12 @@ def status():
                      state=str(error))
     state["battery_status"] = None
     state["power_watts"] = None
+    state["native_limit"] = None
+    try:
+        state["native_limit"] = {"Y": "on", "N": "off", "?": "unknown"}.get(
+            NATIVE_LIMIT.read_text().strip())
+    except OSError:
+        pass
     try:
         state["battery_status"] = (BATTERY / "status").read_text().strip()
         state["capacity"] = int((BATTERY / "capacity").read_text())
@@ -182,6 +189,12 @@ def main(args):
         request("battery", args)
     elif args == ["run"]:
         run()
+    elif args == ["load-driver"]:
+        driver_ready()
+    elif args in (["native-enable"], ["native-disable"]):
+        if not NATIVE_LIMIT.exists():
+            raise OSError("The HP 80% charging limit is unavailable.")
+        NATIVE_LIMIT.write_text("Y\n" if args == ["native-enable"] else "N\n")
     else:
         change_settings(args)
 

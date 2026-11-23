@@ -55,7 +55,7 @@ class CurveEditor(QDialog):
         self.charge_limit.valueChanged.connect(
             lambda value: self.charge_resume.setMaximum(value - 1))
         self.charge_resume.setToolTip("Charging resumes at or below this battery percentage.")
-        charge_form.addRow("Stop charging at", self.charge_limit)
+        charge_form.addRow("Custom soft limit stops at", self.charge_limit)
         charge_form.addRow("Resume charging at", self.charge_resume)
         self.charge_status = QLabel()
         self.charge_status.setWordWrap(True)
@@ -65,8 +65,12 @@ class CurveEditor(QDialog):
         self.save_charge.clicked.connect(self.save_charge_settings)
         self.battery_limit = QPushButton()
         self.battery_limit.clicked.connect(self.switch_battery_limit)
+        self.hp_battery_limit = QPushButton()
+        self.hp_battery_limit.clicked.connect(self.switch_hp_battery_limit)
         charge_actions.addWidget(self.save_charge)
         charge_actions.addWidget(self.battery_limit)
+        charge_actions.addStretch()
+        charge_actions.addWidget(self.hp_battery_limit)
         charge_form.addRow(charge_actions)
         layout.addWidget(self.charge_controls)
 
@@ -202,8 +206,14 @@ class CurveEditor(QDialog):
             if not self.charge_values_loaded:
                 self.charge_limit.setValue(limit)
                 self.charge_resume.setValue(limit - hysteresis)
-            self.battery_limit.setText("Disable Charge Limit" if battery["enabled"] else
-                                       "Enable Charge Limit")
+            self.battery_limit.setText("Disable Soft Limit" if battery["enabled"] else
+                                       "Enable Soft Limit")
+            native = battery["native_limit"]
+            self.hp_battery_limit.setVisible(native is not None)
+            self.hp_battery_limit.setEnabled(native in ("on", "off"))
+            self.hp_battery_limit.setText({
+                "on": "HP hard 80% limit · On", "off": "HP hard 80% limit · Off",
+            }.get(native, "HP hard 80% limit · Unverified"))
             thresholds = f"Stop at {limit}%, resume at {limit - hysteresis}%"
             self.charge_status.setText(f'{thresholds}\n{battery.get("state", "")}')
             self.charge_controls.setEnabled(not busy)
@@ -245,6 +255,11 @@ class CurveEditor(QDialog):
 
     def switch_battery_limit(self):
         self.battery_command("disable" if battery_limit_status()["enabled"] else "enable")
+
+    def switch_hp_battery_limit(self):
+        native = battery_limit_status()["native_limit"]
+        if native in ("on", "off"):
+            self.battery_command("native-disable" if native == "on" else "native-enable")
 
     def battery_command(self, *operations):
         self.process.start(str(BASE / "curve-python"),

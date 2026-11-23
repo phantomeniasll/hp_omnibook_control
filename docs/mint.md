@@ -18,7 +18,7 @@ Installation targets Linux Mint 22 Cinnamon and builds a module for the currentl
 
 ```sh
 sudo apt update
-sudo apt install build-essential "linux-headers-$(uname -r)" kmod python3 python3-pyqt6
+sudo apt install acpica-tools build-essential "linux-headers-$(uname -r)" kmod python3 python3-pyqt6
 export OMNIBOOK_RELEASE_ARCHIVE="/absolute/path/to/omnibook-fan-curves.tar.gz"
 export OMNIBOOK_RELEASE_SHA256="<SHA-256 from a trusted release channel>"
 sh ./packaging/mint/install.sh

@@ -151,13 +151,18 @@ ColumnLayout {
             return i18n("Charge-limit service is inactive.");
         if (charge.state !== "Automatic charging" && charge.state !== "Charging paused")
             return charge.state || "";
-        if (!charge.enabled)
-            return i18n("Charge limit off. HP manages charging.");
+        if (!charge.enabled) {
+            if (charge.native_limit === "on")
+                return i18n("HP hard 80% limit is enabled.");
+            if (charge.native_limit === "unknown")
+                return i18n("Could not verify the HP charging limit.");
+            return i18n("Custom soft limit off. HP manages charging.");
+        }
         if (charge.online === false)
             return i18n("The charge limit applies when plugged in.");
         const resume = charge.limit - charge.hysteresis;
         if (charge.paused && charge.battery_status === "Not charging")
-            return i18n("Held by the %1% limit. Charging resumes at %2%.", charge.limit, resume);
+            return i18n("Held by the custom soft limit at %1%. Charging resumes at %2%.", charge.limit, resume);
         if (charge.battery_status === "Charging" && charge.capacity < charge.limit)
             return i18n("Charging toward the %1% limit.", charge.limit);
         return i18n("Limit on. Stops at %1% and resumes at %2%.", charge.limit, resume);
@@ -312,9 +317,24 @@ ColumnLayout {
         Layout.fillWidth: true
         visible: root.chargeAvailable || !!root.charge.battery_status
 
-        PlasmaComponents.Label {
-            text: i18n("Battery Charging")
-            font.weight: Font.DemiBold
+        RowLayout {
+            Layout.fillWidth: true
+
+            PlasmaComponents.Label {
+                text: i18n("Battery Charging")
+                font.weight: Font.DemiBold
+            }
+
+            Item { Layout.fillWidth: true }
+
+            PlasmaComponents.Switch {
+                visible: !!root.charge.native_limit
+                enabled: !root.pendingCommand && root.charge.native_limit !== "unknown"
+                checked: root.charge.native_limit === "on"
+                text: i18n("HP hard 80% limit")
+                onClicked: root.runRequest(root.charge.native_limit === "on"
+                                           ? "native-disable" : "native-enable", root.chargeHelper)
+            }
         }
 
         PlasmaComponents.Label {
@@ -334,6 +354,9 @@ ColumnLayout {
             visible: root.chargeAvailable
             enabled: !root.pendingCommand
 
+            PlasmaComponents.Label {
+                text: i18n("Custom soft limit")
+            }
             PlasmaComponents.Label {
                 text: i18n("Stop at")
             }
@@ -364,7 +387,7 @@ ColumnLayout {
             enabled: !root.pendingCommand
 
             PlasmaComponents.Button {
-                text: root.charge.enabled ? i18n("Disable Limit") : i18n("Enable Limit")
+                text: root.charge.enabled ? i18n("Disable Soft Limit") : i18n("Enable Soft Limit")
                 onClicked: root.runRequest(root.charge.enabled ? "disable" : "enable", root.chargeHelper)
             }
 

@@ -12,6 +12,7 @@
 #include <linux/workqueue.h>
 
 #include "omnibook-acpi.h"
+#include "omnibook-native-battery.h"
 
 #define CHARGE_AUTO 4
 #define CHARGE_INHIBIT 5
@@ -181,6 +182,67 @@ static const struct kernel_param_ops charge_ops = {
 };
 module_param_cb(inhibit, &charge_ops, NULL, 0644);
 
+static int native_limit_set(const char *value, const struct kernel_param *parameter)
+{
+	bool requested;
+	int previous, written, result;
+
+	if (kstrtobool(value, &requested))
+		return -EINVAL;
+	mutex_lock(&charge_lock);
+	result = -EOPNOTSUPP;
+	if (!ready || native_instance < 0)
+		goto out;
+	result = -EBUSY;
+	if (suspended)
+		goto out;
+
+	previous = native_read(native_instance);
+	native_state = previous;
+	result = -EIO;
+	if (previous < 0)
+		goto out;
+	if (previous == requested) {
+		result = 0;
+		goto out;
+	}
+	if (restore_charge())
+		goto out;
+
+	written = native_write(requested);
+	native_state = native_read(native_instance);
+	if (!written && native_state == requested) {
+		result = 0;
+		goto out;
+	}
+	if (written || native_state != previous) {
+		written = native_write(previous);
+		native_state = native_read(native_instance);
+		if (written || native_state != previous)
+			pr_warn("Could not verify restoration of Battery Health Manager\n");
+	}
+out:
+	mutex_unlock(&charge_lock);
+	return result;
+}
+
+static int native_limit_get(char *buffer, const struct kernel_param *parameter)
+{
+	char state;
+
+	mutex_lock(&charge_lock);
+	state = !ready || native_instance < 0 ? '-' :
+		native_state < 0 ? '?' : native_state ? 'Y' : 'N';
+	mutex_unlock(&charge_lock);
+	return sysfs_emit(buffer, "%c\n", state);
+}
+
+static const struct kernel_param_ops native_limit_ops = {
+	.set = native_limit_set,
+	.get = native_limit_get,
+};
+module_param_cb(native_limit, &native_limit_ops, NULL, 0644);
+
 static int suspend_charge(struct notifier_block *block, unsigned long event, void *data)
 {
 	int result = 0;
@@ -227,11 +289,14 @@ static int __init charge_init(void)
 	}
 	pr_info("ACPI charging methods available; pause requests require firmware confirmation\n");
 
+	native_init();
 	result = register_pm_notifier(&sleep_notifier);
 	if (!result) {
 		mutex_lock(&charge_lock);
 		ready = true;
 		mutex_unlock(&charge_lock);
+	} else {
+		native_unload();
 	}
 	return result;
 }
@@ -247,6 +312,7 @@ static void __exit charge_exit(void)
 	/* Normal removal is impossible until the ownership reference is released. */
 	WARN_ON_ONCE(owned);
 	mutex_unlock(&charge_lock);
+	native_unload();
 }
 
 module_init(charge_init);

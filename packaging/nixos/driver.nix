@@ -1,4 +1,4 @@
-{ lib, stdenv, kernel }:
+{ lib, stdenv, kernel, acpica-tools }:
 
 stdenv.mkDerivation {
   pname = "omnibook-fan-driver";
@@ -10,10 +10,12 @@ stdenv.mkDerivation {
       ../../driver/omnibook-acpi.h
       ../../driver/omnibook-fan-probe.c
       ../../driver/omnibook-charge-control.c
+      ../../driver/omnibook-native-battery.h
+      ../../driver/omnibook_native_read.asl
     ];
   };
 
-  nativeBuildInputs = kernel.moduleBuildDependencies;
+  nativeBuildInputs = kernel.moduleBuildDependencies ++ [ acpica-tools ];
   hardeningDisable = [ "all" ];
   dontConfigure = true;
   enableParallelBuilding = true;

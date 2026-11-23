@@ -41,7 +41,7 @@ in {
 
     systemd.services.omnibook-control = {
       bindsTo = [ "omnibook-control.socket" ];
-      after = [ "omnibook-control.socket" ];
+      after = [ "omnibook-control.socket" ] ++ lib.optional cfg.batteryLimit.enable "omnibook-charge-limit.service";
       description = "HP OmniBook privileged control listener";
       serviceConfig = {
         ExecStart = "${app}/curve-python ${app}/control_runner.py listen";
@@ -64,6 +64,7 @@ in {
           "-/run/omnibook-fan-curves"
           "-/var/lib/omnibook-charge-limit"
           "-/sys/devices/platform/hp-wmi/platform-profile"
+          "-/sys/module/omnibook_charge_control/parameters/native_limit"
         ];
       };
     };
@@ -92,6 +93,7 @@ in {
       unitConfig.ConditionPathExists = "/sys/class/power_supply/BAT0";
       serviceConfig = {
         ExecStart = "${app}/curve-python ${app}/battery_limit.py run";
+        ExecStartPre = "-${app}/curve-python ${app}/battery_limit.py load-driver";
         StateDirectory = "omnibook-charge-limit";
         RuntimeDirectory = "omnibook-charge-limit";
         StateDirectoryMode = "0755";

@@ -2,7 +2,7 @@
 Description=HP OmniBook privileged control listener
 
 BindsTo=omnibook-control.socket
-After=omnibook-control.socket
+After=omnibook-control.socket omnibook-charge-limit.service
 
 [Service]
 ExecStart=/usr/local/lib/omnibook-fan-curves/curve-python /usr/local/lib/omnibook-fan-curves/control_runner.py listen
@@ -22,3 +22,4 @@ RestrictAddressFamilies=AF_UNIX
 ReadOnlyPaths=/sys
 ReadWritePaths=-/var/lib/omnibook-fan-curves -/run/omnibook-fan-curves -/var/lib/omnibook-charge-limit
 ReadWritePaths=-/sys/devices/platform/hp-wmi/platform-profile
+ReadWritePaths=-/sys/module/omnibook_charge_control/parameters/native_limit

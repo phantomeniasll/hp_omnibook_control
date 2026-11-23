@@ -21,7 +21,8 @@ PEER_CREDENTIALS = struct.Struct("=iII")
 OPERATIONS = {
     "fan": {"hp-mode": 1, "save": 1, "save-select": 1, "select": 1,
             "boost": 0, "stop-boost": 0},
-    "battery": {"set": 2, "enable": 0, "disable": 0},
+    "battery": {"set": 2, "enable": 0, "disable": 0,
+                "native-enable": 0, "native-disable": 0},
 }
 
 

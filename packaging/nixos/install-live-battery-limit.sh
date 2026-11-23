@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-export PATH=/run/current-system/sw/bin
+export PATH=/run/current-system/sw/bin:/run/current-system/sw/sbin
 [ "$(id -u)" -eq 0 ] || { printf 'Run with sudo.\n' >&2; exit 1; }
 [ "$#" -eq 2 ] || [ "$#" -eq 4 ] || {
     printf 'Use hp-install-live CHARGE_MODULE SHA256 [FAN_MODULE SHA256].\n' >&2

@@ -4,6 +4,7 @@ After=systemd-modules-load.service
 ConditionPathExists=/sys/class/power_supply/BAT0
 
 [Service]
+ExecStartPre=-/usr/local/lib/omnibook-fan-curves/curve-python /usr/local/lib/omnibook-fan-curves/battery_limit.py load-driver
 ExecStart=/usr/local/lib/omnibook-fan-curves/curve-python /usr/local/lib/omnibook-fan-curves/battery_limit.py run
 StateDirectory=omnibook-charge-limit
 RuntimeDirectory=omnibook-charge-limit
