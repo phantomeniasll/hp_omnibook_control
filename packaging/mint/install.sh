@@ -91,8 +91,10 @@ if [ ! -f "$headers/Makefile" ]; then
     printf 'Install matching kernel headers: sudo apt install linux-headers-%s\n' "$release" >&2
     exit 1
 fi
+umask 022
 make -C "$headers" M="$base/driver" modules
 module="$base/driver/omnibook-fan-probe.ko"
+chmod 0644 "$module" "$base/driver/omnibook-charge-control.ko"
 if [ "${1:-}" = "--build-only" ]; then
     printf '%s\n' "$module"
 else

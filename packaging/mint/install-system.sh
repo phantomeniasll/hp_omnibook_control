@@ -149,9 +149,10 @@ fi
 ln -sfn "../$fan" "$fan_link"
 ln -sfn "../$socket" "$socket_link"
 systemctl daemon-reload
-systemctl start "$fan" "$socket"
-"$dest/curve-python" "$dest/control_runner.py" check
+systemctl start "$fan"
 if [ -f "$units/$charge" ]; then systemctl start "$charge"; fi
+systemctl start "$socket"
+"$dest/curve-python" "$dest/control_runner.py" check
 for service in "$fan" "$charge"; do
     if [ ! -f "$units/$service" ]; then continue; fi
     for attempt in 1 2 3 4 5; do
