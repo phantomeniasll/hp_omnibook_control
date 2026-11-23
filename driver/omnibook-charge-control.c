@@ -215,7 +215,7 @@ static int native_limit_set(const char *value, const struct kernel_param *parame
 		result = 0;
 		goto out;
 	}
-	was_inhibited = inhibited;
+	was_inhibited = inhibited && time_before(jiffies, lease_until);
 	if (restore_charge())
 		goto out;
 

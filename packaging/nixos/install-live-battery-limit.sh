@@ -26,10 +26,11 @@ socket=omnibook-control.socket
 runner=omnibook-control.service
 legacy=omnibook-control@.service
 cli=/usr/local/bin/hp-charge-limit
+gcroot=/nix/var/nix/gcroots/omnibook-live-backend
 battery_link="$units/multi-user.target.wants/$battery"
 fan_link="$units/multi-user.target.wants/$fan"
 socket_link="$units/sockets.target.wants/$socket"
-managed_files="$units/$battery $units/$fan $units/$socket $units/$runner $units/$legacy $battery_link $fan_link $socket_link $cli"
+managed_files="$units/$battery $units/$fan $units/$socket $units/$runner $units/$legacy $battery_link $fan_link $socket_link $cli $gcroot"
 uid=${SUDO_UID:-${PKEXEC_UID:-0}}
 release=$(uname -r)
 staging=$(mktemp -d /run/omnibook-stage.XXXXXX)
@@ -92,9 +93,11 @@ fan_module="$next/$release/omnibook-fan-probe.ko"
 stage_module "$1" "$charge_module" "$2" omnibook_charge_control
 if [ "$#" -eq 4 ]; then
     stage_module "$3" "$fan_module" "$4" omnibook_fan_probe
-    systemctl is-active --quiet "$fan" && old_fan=true
+elif [ -f "$dest/$release/omnibook-fan-probe.ko" ]; then
+    install -m644 "$dest/$release/omnibook-fan-probe.ko" "$fan_module"
 fi
 install -m644 "$app/"*.py "$app/curves.json" "$next/"
+systemctl is-active --quiet "$fan" && old_fan=true
 systemctl is-active --quiet "$battery" && old_charge=true
 systemctl is-active --quiet "$socket" && old_socket=true
 
@@ -137,7 +140,7 @@ if [ -e "$dest" ] || [ -L "$dest" ]; then
     mv -T -- "$dest" "$staging/previous-app"
 fi
 mv -T -- "$next" "$dest"
-ln -sfn "$package" /nix/var/nix/gcroots/omnibook-live-backend
+ln -sfn "$package" "$gcroot"
 
 groupadd --force --system omnibook-control
 account=$(getent passwd "$uid" | cut -d: -f1)

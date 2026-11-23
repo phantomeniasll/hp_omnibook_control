@@ -3,6 +3,8 @@
 import errno
 import json
 import os
+import select
+import signal
 import socket
 import struct
 import subprocess
@@ -33,7 +35,7 @@ def request(feature, args):
     data = json.dumps([feature, *args]).encode() + b"\n"
     if len(data) > MAX_REQUEST:
         raise ValueError("OmniBook control request is too large.")
-    for attempt in range(2):
+    for attempt in range(3):
         with socket.socket(socket.AF_UNIX) as client:
             client.settimeout(8)
             try:
@@ -48,8 +50,8 @@ def request(feature, args):
         if not reply:
             raise OSError("The OmniBook control runner did not respond.")
         result = json.loads(reply)
-        if result.get("retry") and attempt == 0:
-            time.sleep(0.2)
+        if result.get("retry") and attempt < 2:
+            time.sleep(0.25)
             continue
         if result["error"]:
             raise OSError(result["error"])
@@ -124,56 +126,86 @@ def listen(listener):
     rate = Counter()
     window_end = time.monotonic() + 1
     reloading = False
-    while True:
-        now = time.monotonic()
-        if now >= window_end:
-            rate.clear()
-            window_end = now + 1
-        for process, (uid, deadline) in list(workers.items()):
-            code = process.poll()
-            if code is None:
-                if now >= deadline:
-                    process.kill()
-                continue
-            if code == RELOAD_EXIT:
-                reloading = True
-            del workers[process]
-            active[uid] -= 1
-            if not active[uid]:
-                del active[uid]
-        if reloading:
-            if not workers:
-                return
-            time.sleep(0.05)
-            continue
+    wake_read, wake_write = os.pipe()
+    os.set_blocking(wake_read, False)
+    os.set_blocking(wake_write, False)
 
-        listener.settimeout(0.25 if workers else IDLE_TIMEOUT)
+    def on_child(_signum, _frame):
         try:
-            peer, _ = listener.accept()
-        except TimeoutError:
-            if not workers:
+            os.write(wake_write, b"\0")
+        except OSError:
+            pass
+
+    previous_sigchld = signal.signal(signal.SIGCHLD, on_child)
+    listener.setblocking(False)
+    try:
+        while True:
+            now = time.monotonic()
+            if now >= window_end:
+                rate.clear()
+                window_end = now + 1
+            for process, (uid, deadline) in list(workers.items()):
+                code = process.poll()
+                if code is None:
+                    if now >= deadline:
+                        process.kill()
+                    continue
+                if code == RELOAD_EXIT:
+                    reloading = True
+                del workers[process]
+                active[uid] -= 1
+                if not active[uid]:
+                    del active[uid]
+            if reloading and not workers:
                 return
-            continue
-        with peer:
+
+            watched = [wake_read] if reloading else [listener, wake_read]
+            timeout = 0.25 if workers else IDLE_TIMEOUT
             try:
-                _, uid, _ = PEER_CREDENTIALS.unpack(peer.getsockopt(
-                    socket.SOL_SOCKET, socket.SO_PEERCRED, PEER_CREDENTIALS.size))
-            except OSError:
+                ready, _, _ = select.select(watched, [], [], timeout)
+            except InterruptedError:
                 continue
-            if active[uid] >= PER_UID_WORKERS or rate[uid] >= PER_UID_RATE:
-                reply(peer, "Too many OmniBook requests from your account. Try again shortly.", 0.05)
+            if wake_read in ready:
+                try:
+                    os.read(wake_read, 4096)
+                except OSError:
+                    pass
                 continue
-            if len(workers) >= MAX_WORKERS:
-                reply(peer, "The OmniBook service is busy. Try again shortly.", 0.05)
+            if not ready:
+                if not workers:
+                    return
+                continue
+            if reloading or listener not in ready:
                 continue
             try:
-                process = subprocess.Popen([sys.executable, __file__, "serve"], stdin=peer)
-            except OSError as error:
-                reply(peer, str(error), 0.05)
+                peer, _ = listener.accept()
+            except BlockingIOError:
                 continue
-            workers[process] = (uid, time.monotonic() + WORKER_TIMEOUT)
-            active[uid] += 1
-            rate[uid] += 1
+            peer.setblocking(True)
+            with peer:
+                try:
+                    _, uid, _ = PEER_CREDENTIALS.unpack(peer.getsockopt(
+                        socket.SOL_SOCKET, socket.SO_PEERCRED, PEER_CREDENTIALS.size))
+                except OSError:
+                    continue
+                if active[uid] >= PER_UID_WORKERS or rate[uid] >= PER_UID_RATE:
+                    reply(peer, "Too many OmniBook requests from your account. Try again shortly.", 0.05)
+                    continue
+                if len(workers) >= MAX_WORKERS:
+                    reply(peer, "The OmniBook service is busy. Try again shortly.", 0.05)
+                    continue
+                try:
+                    process = subprocess.Popen([sys.executable, __file__, "serve"], stdin=peer)
+                except OSError as error:
+                    reply(peer, str(error), 0.05)
+                    continue
+                workers[process] = (uid, time.monotonic() + WORKER_TIMEOUT)
+                active[uid] += 1
+                rate[uid] += 1
+    finally:
+        signal.signal(signal.SIGCHLD, previous_sigchld)
+        os.close(wake_read)
+        os.close(wake_write)
 
 
 if __name__ == "__main__":
