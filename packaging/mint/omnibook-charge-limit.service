@@ -1,7 +1,7 @@
 [Unit]
 Description=HP OmniBook battery charge limit
 After=systemd-modules-load.service
-ConditionPathExists=/sys/class/power_supply/BAT0
+ConditionPathExistsGlob=/sys/class/power_supply/BAT*
 
 [Service]
 ExecStartPre=-/usr/local/lib/omnibook-fan-curves/curve-python /usr/local/lib/omnibook-fan-curves/battery_limit.py load-driver

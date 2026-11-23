@@ -107,13 +107,15 @@ def driver_ready():
 
 
 def release():
-    if PARAM.exists():
+    if PARAM.exists() and PARAM.read_text().strip() != "N":
         PARAM.write_text("N\n")
 
 
 def status():
     try:
         state = json.loads(STATUS.read_text())
+        if not isinstance(state, dict):
+            raise ValueError("Invalid charge limit status")
     except (OSError, ValueError):
         state = {"service_active": False, "state": "Charge limit service is inactive"}
     else:
@@ -195,12 +197,15 @@ def run():
                     if target_mode(True, True, capacity, paused, settings["limit"],
                                    settings["hysteresis"]):
                         now = time.monotonic()
-                        if pause_started is None or not paused:
-                            pause_started = now
                         still_charging = (battery / "status").read_text().strip() == "Charging"
-                        if paused and still_charging and now - pause_started >= PAUSE_CONFIRM_SECONDS:
-                            pause_rejected = True
-                            raise OSError("Battery continued charging after the firmware accepted the pause.")
+                        if still_charging:
+                            if pause_started is None or not paused:
+                                pause_started = now
+                            if paused and now - pause_started >= PAUSE_CONFIRM_SECONDS:
+                                pause_rejected = True
+                                raise OSError("Battery continued charging after the firmware accepted the pause.")
+                        else:
+                            pause_started = None
                         PARAM.write_text("Y\n")
                         state["paused"] = True
                         state["state"] = "Checking charge pause" if still_charging else "Charging paused"

@@ -92,7 +92,7 @@ in {
       description = "HP OmniBook battery charge limit";
       after = [ "systemd-modules-load.service" ];
       wantedBy = [ "multi-user.target" ];
-      unitConfig.ConditionPathExists = "/sys/class/power_supply/BAT0";
+      unitConfig.ConditionPathExistsGlob = "/sys/class/power_supply/BAT*";
       serviceConfig = {
         ExecStart = "${app}/curve-python ${app}/battery_limit.py run";
         ExecStartPre = "-${app}/curve-python ${app}/battery_limit.py load-driver";

@@ -1,5 +1,6 @@
 """Run a bounded set of OmniBook controls through a root-owned systemd socket."""
 
+import errno
 import json
 import os
 import socket
@@ -15,6 +16,7 @@ MAX_REQUEST = 16384
 READ_TIMEOUT = 2
 WORKER_TIMEOUT = 6
 IDLE_TIMEOUT = 30
+RELOAD_EXIT = 75
 MAX_WORKERS = 16
 PER_UID_WORKERS = 2
 PER_UID_RATE = 8
@@ -31,22 +33,27 @@ def request(feature, args):
     data = json.dumps([feature, *args]).encode() + b"\n"
     if len(data) > MAX_REQUEST:
         raise ValueError("OmniBook control request is too large.")
-    with socket.socket(socket.AF_UNIX) as client:
-        client.settimeout(8)
-        try:
-            client.connect(str(SOCKET))
-        except PermissionError as error:
-            raise PermissionError("Join the omnibook-control group and sign in again.") from error
-        except (FileNotFoundError, ConnectionRefusedError) as error:
-            raise OSError("The OmniBook control socket is inactive.") from error
-        client.sendall(data)
-        with client.makefile("rb") as response:
-            reply = response.readline(MAX_REQUEST)
-    if not reply:
-        raise OSError("The OmniBook control runner did not respond.")
-    result = json.loads(reply)
-    if result["error"]:
-        raise OSError(result["error"])
+    for attempt in range(2):
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(8)
+            try:
+                client.connect(str(SOCKET))
+            except PermissionError as error:
+                raise PermissionError("Join the omnibook-control group and sign in again.") from error
+            except (FileNotFoundError, ConnectionRefusedError) as error:
+                raise OSError("The OmniBook control socket is inactive.") from error
+            client.sendall(data)
+            with client.makefile("rb") as response:
+                reply = response.readline(MAX_REQUEST)
+        if not reply:
+            raise OSError("The OmniBook control runner did not respond.")
+        result = json.loads(reply)
+        if result.get("retry") and attempt == 0:
+            time.sleep(0.2)
+            continue
+        if result["error"]:
+            raise OSError(result["error"])
+        return
 
 
 def dispatch(command):
@@ -83,10 +90,13 @@ def read_request(peer):
     raise ValueError("Invalid OmniBook control request size.")
 
 
-def reply(peer, error, timeout=1):
+def reply(peer, error, timeout=1, retry=False):
+    payload = {"error": error}
+    if retry:
+        payload["retry"] = True
     try:
         peer.settimeout(timeout)
-        peer.sendall(json.dumps({"error": error}).encode() + b"\n")
+        peer.sendall(json.dumps(payload).encode() + b"\n")
     except (TimeoutError, BrokenPipeError, ConnectionResetError):
         pass
 
@@ -94,10 +104,18 @@ def reply(peer, error, timeout=1):
 def serve(peer):
     try:
         dispatch(read_request(peer))
-    except (OSError, ValueError, KeyError, TypeError) as error:
+    except OSError as error:
+        if error.errno == errno.EROFS:
+            reply(peer, str(error), retry=True)
+            return RELOAD_EXIT
         reply(peer, str(error))
+        return 0
+    except (ValueError, KeyError, TypeError) as error:
+        reply(peer, str(error))
+        return 0
     else:
         reply(peer, "")
+        return 0
 
 
 def listen(listener):
@@ -105,20 +123,29 @@ def listen(listener):
     active = Counter()
     rate = Counter()
     window_end = time.monotonic() + 1
+    reloading = False
     while True:
         now = time.monotonic()
         if now >= window_end:
             rate.clear()
             window_end = now + 1
         for process, (uid, deadline) in list(workers.items()):
-            if process.poll() is None:
+            code = process.poll()
+            if code is None:
                 if now >= deadline:
                     process.kill()
                 continue
+            if code == RELOAD_EXIT:
+                reloading = True
             del workers[process]
             active[uid] -= 1
             if not active[uid]:
                 del active[uid]
+        if reloading:
+            if not workers:
+                return
+            time.sleep(0.05)
+            continue
 
         listener.settimeout(0.25 if workers else IDLE_TIMEOUT)
         try:
@@ -164,6 +191,6 @@ if __name__ == "__main__":
             listen(listener)
     elif sys.argv[1:] == ["serve"]:
         with socket.socket(fileno=os.dup(sys.stdin.fileno())) as peer:
-            serve(peer)
+            sys.exit(serve(peer))
     else:
         sys.exit("A systemd listener socket is required.")

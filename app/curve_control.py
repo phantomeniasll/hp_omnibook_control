@@ -50,6 +50,8 @@ def atomic_write(path, data):
     with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as file:
         temporary = Path(file.name)
         file.write(data)
+        file.flush()
+        os.fsync(file.fileno())
     try:
         temporary.chmod(0o644)
         temporary.replace(path)
@@ -119,7 +121,7 @@ def change_config(command, argument):
 
 
 def sensor(directory, label_file, label, value_file):
-    for device in directory.glob("*"):
+    for device in sorted(directory.glob("*")):
         try:
             if (device / label_file).read_text().strip() == label:
                 return int((device / value_file).read_text())
@@ -162,11 +164,15 @@ def ensure_module():
         if MODULE.exists():
             if fan_recovering() or (PARAM / "active").read_text().strip() == "Y":
                 raise OSError("Waiting for the fan override to be released")
-            subprocess.run([BIN / "rmmod", MODULE.name], check=True, capture_output=True, text=True)
+            result = subprocess.run([BIN / "rmmod", MODULE.name], capture_output=True, text=True)
+            if result.returncode:
+                raise OSError(result.stderr.strip() or "Could not unload the fan control module")
         module_path = BASE / os.uname().release / "omnibook-fan-probe.ko"
         if not module_path.is_file():
             raise OSError("Fan curves are unavailable for this kernel")
-        subprocess.run([BIN / "insmod", module_path, "curve=1"], check=True, capture_output=True, text=True)
+        result = subprocess.run([BIN / "insmod", module_path, "curve=1"], capture_output=True, text=True)
+        if result.returncode:
+            raise OSError(result.stderr.strip() or "The kernel rejected the fan control module")
 
 
 def boost_deadline():
@@ -363,8 +369,10 @@ def main(args):
             raise OSError("The background fan service is unavailable.")
         change_boost(args == ["boost"])
     elif args == ["run"]:
-        if not CONFIG.exists():
-            atomic_write(CONFIG, (BASE / "curves.json").read_text())
+        with (STATE / "config.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if not CONFIG.exists():
+                atomic_write(CONFIG, (BASE / "curves.json").read_text())
         run()
     else:
         raise ValueError("Unknown fan curve command.")
