@@ -129,6 +129,8 @@ ColumnLayout {
                 text: modelData.label
                 enabled: !root.pendingCommand && root.hpModes.includes(modelData.key)
                 highlighted: modelData.key === root.activeMode
+                font.bold: highlighted
+                icon.name: highlighted ? "emblem-default" : ""
                 onClicked: if (modelData.key !== root.activeMode) root.runRequest("set " + modelData.key)
             }
         }
@@ -138,6 +140,8 @@ ColumnLayout {
         Layout.fillWidth: true
         enabled: !root.pendingCommand
         highlighted: root.boostActive
+        font.bold: highlighted
+        icon.name: highlighted ? "emblem-default" : ""
         text: root.boostActive ? i18n("End Fan Boost") : i18n("Fan Boost (30 seconds)")
         onClicked: root.runRequest(root.boostActive ? "auto" : "boost")
     }
@@ -159,6 +163,8 @@ ColumnLayout {
                 text: modelData.label
                 enabled: !root.pendingCommand && root.activeCurve !== "unavailable"
                 highlighted: modelData.key === root.activeCurve
+                font.bold: highlighted
+                icon.name: highlighted ? "emblem-default" : ""
                 onClicked: if (modelData.key !== root.activeCurve) root.runRequest("curve " + modelData.key)
             }
         }
@@ -167,7 +173,9 @@ ColumnLayout {
             Layout.fillWidth: true
             enabled: !root.pendingCommand && root.activeCurve !== "unavailable"
             highlighted: root.activeCurve === "auto"
-            text: i18n("Automatic")
+            font.bold: highlighted
+            icon.name: highlighted ? "emblem-default" : ""
+            text: i18n("HP default")
             onClicked: if (root.activeCurve !== "auto") root.runRequest("curve auto")
         }
 
