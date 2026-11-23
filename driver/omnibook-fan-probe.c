@@ -27,8 +27,10 @@
 #define ACPI_FLOOR_RISE 20
 #define MIN_CURVE_RPM 3000
 #define CURVE_LEASE_SECONDS 6
+#define SPINUP_GRACE (5 * HZ)
 
 static acpi_handle pci0;
+static bool write_verified;
 static bool write_rejected;
 static bool ready;
 static bool curve;
@@ -45,6 +47,7 @@ static int firmware_temperature;
 static unsigned long lease_until;
 static unsigned long ownership_until;
 static unsigned long firmware_until;
+static unsigned long spinup_until;
 static DEFINE_MUTEX(fan_lock);
 
 module_param(curve, bool, 0444);
@@ -188,7 +191,8 @@ static void monitor_override(struct work_struct *work)
 	}
 	tachometer = mailbox_read(FAN_TACHOMETER);
 	control = mailbox_read(FAN_CONTROL);
-	if (tachometer <= 0 || tachometer == U8_MAX ||
+	if (tachometer < 0 || tachometer == U8_MAX ||
+	    (tachometer == 0 && time_after_eq(jiffies, spinup_until)) ||
 	    control < 0 || control == U8_MAX || !(control & FAN_OVERRIDE) ||
 	    mailbox_read(FAN_TARGET) != active_target / RPM_PER_UNIT)
 		goto restore;
@@ -241,8 +245,10 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 		result = temperature;
 		goto restore;
 	}
-	if (boosting && temperature >= ACPI_BOOST_LIMIT)
+	if (boosting && temperature >= ACPI_BOOST_LIMIT) {
+		result = -ERANGE;
 		goto restore;
+	}
 	if (owns_override && (!active || time_after_eq(jiffies, ownership_until) ||
 			      time_after_eq(jiffies, lease_until))) {
 		restore_fan();
@@ -287,6 +293,7 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 			goto out;
 		owns_override = true;
 		ownership_until = jiffies + MAX_OWNERSHIP;
+		spinup_until = jiffies + SPINUP_GRACE;
 		if (set_override(true))
 			goto reject;
 	}
@@ -298,6 +305,7 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 	    mailbox_read(FAN_TARGET) != rpm / RPM_PER_UNIT)
 		goto reject;
 
+	write_verified = true;
 	active_target = rpm;
 	active_boost = boosting;
 	lease_until = jiffies + CURVE_LEASE_SECONDS * HZ;
@@ -309,9 +317,14 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 	goto out;
 
 reject:
-	write_rejected = true;
-	result = -EOPNOTSUPP;
-	pr_warn("Firmware did not confirm the fan command; restoring automatic control\n");
+	if (!write_verified) {
+		write_rejected = true;
+		result = -EOPNOTSUPP;
+		pr_warn("Firmware did not confirm the fan command; restoring automatic control\n");
+	} else {
+		result = -EIO;
+		pr_warn_ratelimited("Fan command failed; restoring automatic control\n");
+	}
 restore:
 	restore_fan();
 out:
