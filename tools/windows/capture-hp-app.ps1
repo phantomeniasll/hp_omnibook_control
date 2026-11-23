@@ -20,17 +20,47 @@ function Invoke-EventLogTool {
     $result
 }
 
+function Get-BatteryBiosSnapshot {
+    try {
+        $settings = @(
+            Get-CimInstance -Namespace 'root\HP\InstrumentedBIOS' -ClassName 'HPBIOS_BIOSEnumeration' -ErrorAction Stop |
+                Where-Object { $_.Name -match 'battery|charging|charge limit|charge threshold|^batt_' } |
+                Sort-Object Name |
+                Select-Object Name, CurrentValue, PossibleValues
+        )
+        if ($settings.Count -eq 0) {
+            Write-Warning 'The HP provider returned no battery-related BIOS settings.'
+            return @{ status = 'no_matching_settings'; settings = @() }
+        }
+        return @{ status = 'ok'; settings = $settings }
+    } catch {
+        Write-Warning 'Could not read battery-related BIOS settings from the HP provider.'
+        return @{ status = 'query_failed'; settings = @() }
+    }
+}
+
 $settings = [xml](Invoke-EventLogTool @('gl', $channel, '/f:xml') | Out-String)
 $wasEnabled = $settings.DocumentElement.GetAttribute('enabled') -eq 'true'
 $before = Read-Host 'Record the HP app setting before the change'
-$started = [DateTime]::UtcNow
+if ($Feature -eq 'battery') {
+    Write-Host 'Reading battery BIOS settings. Wait for the next prompt before changing myHP.'
+    $batteryBefore = Get-BatteryBiosSnapshot
+}
 
 try {
     if (-not $wasEnabled) {
         Invoke-EventLogTool @('sl', $channel, '/e:true', '/q')
     }
+    $started = [DateTime]::UtcNow
     $after = Read-Host "Change only the $Feature setting in the HP app, then enter its new value"
     $finished = [DateTime]::UtcNow
+    if ($Feature -eq 'battery') {
+        $batteryAfter = Get-BatteryBiosSnapshot
+        @{
+            before = $batteryBefore
+            after = $batteryAfter
+        } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 (Join-Path $folder 'battery-bios.json')
+    }
     Invoke-EventLogTool @('sl', $channel, '/e:false')
     $begin = $started.ToString('o')
     $end = $finished.ToString('o')

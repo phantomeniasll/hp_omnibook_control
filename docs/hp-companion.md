@@ -5,7 +5,7 @@ HP lists Battery Manager, enhanced call lighting, Poly Camera Pro, display and p
 | HP feature | Linux status |
 | --- | --- |
 | System Control thermal modes | HP WMI profiles are readable with the low-byte readback fix. The fan target is controlled separately in this project. |
-| Battery Manager | The firmware can pause charging under Linux. HP's native Windows 80% setting still needs a capture. |
+| Battery Manager | The firmware can pause charging under Linux. A Windows trace of disabling the native 80% limit showed a BIOS setting write. The exact setting and value still need verification. |
 | Display brightness | The AMD backlight device exposes current and maximum brightness. HP color presets and enhanced call lighting are separate features. |
 | Keyboard lighting | Linux exposes no keyboard backlight LED device on the tested kernel. Firmware hotkey support does not establish a Linux control path. |
 | Camera and presence | Linux exposes camera nodes and two proximity sensors. Poly effects, presence policy, and gestures need separate investigation. |
@@ -22,6 +22,10 @@ Open the HP app in Windows. From an elevated PowerShell window at the repository
 .\tools\windows\capture-hp-app.ps1 -Feature battery
 ```
 
-Capture enabling and disabling the HP limit separately. The script stores the change window, HP process and service names, and relevant WMI log events in a local folder. Review the logs before sharing them. A WMI event can name the method and calling process while omitting arguments. If the action produces no WMI event, Process Monitor can identify an HP service or device opened during the same toggle.
+Capture enabling and disabling the HP limit separately. Enter the current value at the first prompt. Wait for the script to finish reading the BIOS settings and prompt you to change myHP. Apply the change in myHP, then enter the new value at the prompt.
+
+For a battery capture, `battery-bios.json` contains read-only snapshots of the battery-related BIOS settings reported by HP's WMI provider before and after the toggle. Compare `CurrentValue` for each setting. The file records whether each snapshot succeeded, found no matching settings, or could not query the provider. Review and share this file first.
+
+The output folder also contains the change window, HP process and service names, and WMI events from that window. Review those files before sharing them, since the raw event log can include unrelated system activity. WMI events can name a method and its calling process while omitting the arguments. If the action produces no WMI event, Process Monitor can identify an HP service or device opened during the same toggle.
 
 [Microsoft WMI tracing](https://learn.microsoft.com/windows/win32/wmisdk/tracing-wmi-activity) · [Sysinternals Process Monitor](https://learn.microsoft.com/sysinternals/downloads/procmon)
