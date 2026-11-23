@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
+#include <linux/build_bug.h>
 #include <linux/crc32.h>
 #include "omnibook_native_read.hex"
 
@@ -27,13 +28,14 @@ static bool __init native_supported(void)
 		bool matches;
 
 		if (ACPI_FAILURE(acpi_get_table(ACPI_SIG_SSDT, i, &table)))
-			return false;
+			break;
 		matches = table->length == 30394 &&
 			(crc32_le(~0U, (const u8 *)table, table->length) ^ ~0U) == 0xba1ad9f1;
 		acpi_put_table(table);
 		if (matches)
 			return true;
 	}
+	pr_info("Native Battery Health Manager unavailable: unrecognized HP WMI SSDT\n");
 	return false;
 }
 
@@ -94,8 +96,13 @@ static void __init native_init(void)
 	int instance, state;
 	acpi_status status;
 
-	if (!native_supported() || ACPI_SUCCESS(acpi_get_handle(NULL, HP_READ_METHOD, &handle)))
+	if (!native_supported())
 		return;
+	if (ACPI_SUCCESS(acpi_get_handle(NULL, HP_READ_METHOD, &handle))) {
+		pr_warn("Native Battery Health Manager skipped: %s already exists\n",
+			HP_READ_METHOD);
+		return;
+	}
 
 	table = native_reuse_table();
 	reused = table != NULL;
@@ -142,6 +149,8 @@ static void __init native_init(void)
 	}
 	native_instance = instance;
 	native_state = state;
+	pr_info("Native Battery Health Manager available (instance %d, %s)\n",
+		instance, state ? "on" : "off");
 }
 
 static __le16 *native_put_string(__le16 *output, const char *value)
@@ -163,6 +172,7 @@ static int native_write(bool enable)
 	acpi_status status;
 	int result = -EIO;
 
+	BUILD_BUG_ON(sizeof(HP_BATTERY_ON) > sizeof(HP_BATTERY_OFF));
 	end = native_put_string(end, HP_BATTERY_SETTING);
 	end = native_put_string(end, enable ? HP_BATTERY_ON : HP_BATTERY_OFF);
 	end = native_put_string(end, "<utf-16/>");

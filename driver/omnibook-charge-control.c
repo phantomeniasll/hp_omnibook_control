@@ -20,6 +20,7 @@
 
 static DEFINE_MUTEX(charge_lock);
 static bool ready;
+static bool write_verified;
 static bool write_rejected;
 static bool owned;
 static bool inhibited;
@@ -147,15 +148,21 @@ static int charge_set(const char *value, const struct kernel_param *parameter)
 	if (!sbco(CHARGE_INHIBIT)) {
 		mode = gbco();
 		if (mode >= 4 && mode <= 6) {
+			write_verified = true;
 			inhibited = true;
 			pr_info("Charging paused\n");
 			goto renew;
 		}
 	}
-	write_rejected = true;
-	pr_warn("Firmware did not confirm the charge command; restoring automatic charging\n");
+	if (!write_verified) {
+		write_rejected = true;
+		pr_warn("Firmware did not confirm the charge command; restoring automatic charging\n");
+		result = -EOPNOTSUPP;
+	} else {
+		pr_warn_ratelimited("Charge command failed; restoring automatic charging\n");
+		result = -EIO;
+	}
 	restore_charge();
-	result = -EOPNOTSUPP;
 	goto out;
 renew:
 	lease_until = jiffies + LEASE_TIME;
@@ -261,6 +268,8 @@ static int suspend_charge(struct notifier_block *block, unsigned long event, voi
 	case PM_POST_SUSPEND:
 	case PM_POST_HIBERNATION:
 		suspended = false;
+		if (native_instance >= 0)
+			native_state = native_read(native_instance);
 		break;
 	}
 out:
