@@ -12,6 +12,8 @@
 #include <linux/thermal.h>
 #include <linux/workqueue.h>
 
+#include "omnibook-acpi.h"
+
 #define FAN_CONTROL 0x93
 #define FAN_TARGET 0x94
 #define FAN_TACHOMETER 0x95
@@ -173,14 +175,14 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 	    rpm > REQUESTED_RPM || rpm % RPM_PER_UNIT)
 		return -EINVAL;
 	mutex_lock(&fan_lock);
-	if (!curve || suspended || !safe_to_boost()) {
+	if (!pci0 || !curve || suspended || !safe_to_boost()) {
 		result = -EBUSY;
 		goto out;
 	}
 	control = mailbox_read(FAN_CONTROL);
 	tachometer = mailbox_read(FAN_TACHOMETER);
 	current_target = mailbox_read(FAN_TARGET);
-	if (control < 0 || tachometer < 0 || tachometer == U8_MAX ||
+	if (control < 0 || control == U8_MAX || tachometer < 0 || tachometer == U8_MAX ||
 	    current_target < 0 || current_target == U8_MAX)
 		goto out;
 	if (!active) {
@@ -254,12 +256,29 @@ static int __init omnibook_fan_probe_init(void)
 	int result = -EIO;
 
 	if (!dmi_match(DMI_SYS_VENDOR, "HP") ||
-	    !dmi_match(DMI_BOARD_NAME, "8DA8") ||
-	    !dmi_match(DMI_BIOS_VERSION, "F.11"))
+	    !dmi_match(DMI_BOARD_NAME, "8DA8"))
 		return -ENODEV;
 
-	if (ACPI_FAILURE(acpi_get_handle(NULL, "\\_SB.PCI0", &pci0)))
+	if (ACPI_FAILURE(acpi_get_handle(NULL, "\\_SB.PCI0", &pci0)) ||
+	    !omnibook_has_method(pci0, "RDMB", 1) ||
+	    !omnibook_has_method(pci0, "WRMB", 2) ||
+	    !omnibook_has_method(pci0, "AOMB", 3)) {
+		pr_info("Expected ACPI fan mailbox methods were not found\n");
 		return -ENODEV;
+	}
+
+	control = mailbox_read(FAN_CONTROL);
+	previous_target = mailbox_read(FAN_TARGET);
+	tachometer = mailbox_read(FAN_TACHOMETER);
+	if (control < 0 || control == U8_MAX ||
+	    previous_target < 0 || previous_target == U8_MAX ||
+	    tachometer < 0 || tachometer == U8_MAX) {
+		pr_info("Fan mailbox did not return valid readings\n");
+		return -ENODEV;
+	}
+	if (!dmi_match(DMI_BIOS_VERSION, "F.11"))
+		pr_info("BIOS %s passed the read-only fan checks\n",
+			dmi_get_system_info(DMI_BIOS_VERSION) ?: "unknown");
 
 	if (curve)
 		return boost ? -EINVAL : register_pm_notifier(&fan_pm_notifier);
@@ -269,11 +288,7 @@ static int __init omnibook_fan_probe_init(void)
 		return -EBUSY;
 	}
 
-	control = mailbox_read(FAN_CONTROL);
-	previous_target = mailbox_read(FAN_TARGET);
-	tachometer = mailbox_read(FAN_TACHOMETER);
-	if (control < 0 || previous_target < 0 || tachometer <= 0 ||
-	    tachometer == U8_MAX)
+	if (!tachometer)
 		return -EIO;
 	baseline = tachometer * RPM_PER_UNIT;
 	pr_info("Automatic RPM before probe: %d, control 0x%02x, target byte 0x%02x\n",
@@ -348,5 +363,5 @@ static void __exit omnibook_fan_probe_exit(void)
 module_init(omnibook_fan_probe_init);
 module_exit(omnibook_fan_probe_exit);
 
-MODULE_DESCRIPTION("Timed HP OmniBook 8DA8 F.11 fan boost and hardware probe");
+MODULE_DESCRIPTION("Timed HP OmniBook 8DA8 fan boost and hardware probe");
 MODULE_LICENSE("GPL");

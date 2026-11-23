@@ -7,6 +7,7 @@ stdenv.mkDerivation {
     root = ../../driver;
     fileset = lib.fileset.unions [
       ../../driver/Makefile
+      ../../driver/omnibook-acpi.h
       ../../driver/omnibook-fan-probe.c
       ../../driver/omnibook-charge-control.c
     ];

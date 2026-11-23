@@ -11,11 +11,14 @@
 #include <linux/suspend.h>
 #include <linux/workqueue.h>
 
+#include "omnibook-acpi.h"
+
 #define CHARGE_AUTO 4
 #define CHARGE_INHIBIT 5
 #define LEASE_TIME (60 * HZ)
 
 static DEFINE_MUTEX(charge_lock);
+static bool ready;
 static bool owned;
 static bool inhibited;
 static bool suspended;
@@ -107,6 +110,10 @@ static int charge_set(const char *value, const struct kernel_param *parameter)
 	if (kstrtobool(value, &requested))
 		return -EINVAL;
 	mutex_lock(&charge_lock);
+	if (!ready) {
+		result = -ENODEV;
+		goto out;
+	}
 	if (!requested) {
 		result = restore_charge();
 		if (result) {
@@ -191,11 +198,32 @@ static struct notifier_block sleep_notifier = { .notifier_call = suspend_charge 
 
 static int __init charge_init(void)
 {
+	int mode, result;
+
 	if (!dmi_match(DMI_SYS_VENDOR, "HP") ||
-	    !dmi_match(DMI_BOARD_NAME, "8DA8") ||
-	    !dmi_match(DMI_BIOS_VERSION, "F.11"))
+	    !dmi_match(DMI_BOARD_NAME, "8DA8"))
 		return -ENODEV;
-	return register_pm_notifier(&sleep_notifier);
+	if (!omnibook_has_method(NULL, "\\GBCO", 0) ||
+	    !omnibook_has_method(NULL, "\\SBCO", 1)) {
+		pr_info("Expected ACPI charging methods were not found\n");
+		return -ENODEV;
+	}
+	mode = gbco();
+	if (mode < 0 || mode > 6) {
+		pr_info("ACPI did not return a recognized charging mode\n");
+		return -ENODEV;
+	}
+	if (!dmi_match(DMI_BIOS_VERSION, "F.11"))
+		pr_info("BIOS %s passed the read-only charging checks\n",
+			dmi_get_system_info(DMI_BIOS_VERSION) ?: "unknown");
+
+	result = register_pm_notifier(&sleep_notifier);
+	if (!result) {
+		mutex_lock(&charge_lock);
+		ready = true;
+		mutex_unlock(&charge_lock);
+	}
+	return result;
 }
 
 static void __exit charge_exit(void)

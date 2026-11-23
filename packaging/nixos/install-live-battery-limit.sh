@@ -7,7 +7,7 @@ python=$1
 case "$python" in /nix/store/*/bin/python3|/nix/store/*/bin/python3.*) ;; *) exit 1 ;; esac
 [ -x "$python" ]
 [ "$(cat /sys/class/dmi/id/board_name)" = 8DA8 ]
-[ "$(cat /sys/class/dmi/id/bios_version)" = F.11 ]
+[ "$(cat /sys/class/dmi/id/sys_vendor)" = HP ]
 source=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 module="$source/driver/omnibook-charge-control.ko"
 release=$(uname -r)

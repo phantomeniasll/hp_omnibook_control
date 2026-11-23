@@ -4,7 +4,7 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 [ "$(id -u)" -eq 0 ]
 [ "$#" -eq 1 ]
 [ "$(cat /sys/class/dmi/id/board_name)" = 8DA8 ]
-[ "$(cat /sys/class/dmi/id/bios_version)" = F.11 ]
+[ "$(cat /sys/class/dmi/id/sys_vendor)" = HP ]
 [ "$(modinfo -F name "$1")" = omnibook_fan_probe ]
 release=$(uname -r)
 version=$(modinfo -F vermagic "$1")

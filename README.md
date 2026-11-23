@@ -1,6 +1,6 @@
 # HP OmniBook Fan Curves
 
-A desktop editor and background fan controller for the **HP OmniBook X Flip 16-ar0xxx**, board **8DA8**, BIOS **F.11**. It includes four editable curves, timed Fan Boost, and live hardware temperatures.
+A desktop editor and background fan controller for the **HP OmniBook X Flip 16-ar0xxx**, board **8DA8**. BIOS **F.11** was tested on the laptop. Other BIOS versions can load after read-only compatibility checks. It includes four editable curves, timed Fan Boost, and live hardware temperatures.
 
 | Desktop or distribution | Setup |
 | --- | --- |
@@ -27,7 +27,7 @@ Check the target system before installing anything:
 cat /sys/class/dmi/id/board_name /sys/class/dmi/id/bios_version
 ```
 
-The expected lines are `8DA8` and `F.11`. The kernel module also checks the HP vendor identifier. Do not extend the match to another board or BIOS without verifying its firmware interface.
+The board must report `8DA8`. Record the BIOS version with any test results. The kernel modules also check the HP vendor and expected ACPI methods before use.
 
 ## Repository layout
 

@@ -1,6 +1,8 @@
 # Firmware evidence
 
-The implementation is scoped to HP board 8DA8 with BIOS F.11. It was derived by examining the DSDT and SSDTs from that board with [ACPICA iASL](https://github.com/acpica/acpica). The AML dump is machine-specific. This repository contains source and notes.
+The implementation is scoped to HP board 8DA8. BIOS F.11 was tested on the laptop. The driver checks for the expected ACPI method signatures and valid fan or charge readback before accepting commands on other BIOS versions. It was derived by examining the DSDT and SSDTs from that board with [ACPICA iASL](https://github.com/acpica/acpica). The AML dump is machine-specific. This repository contains source and notes.
+
+HP's packaged F.11 and F.13 images for board 8DA8 contain byte-for-byte identical DSDT, HP WMI, and UCSI ACPI tables. Those tables cover the fan mailbox and the battery pause and resume methods. F.13 still needs a live fan and charging test because the embedded controller's behavior can differ. [F.11 package metadata](https://ftp.hp.com/pub/softpaq/sp165501-166000/sp165708.cva) · [F.13 package metadata](https://ftp.hp.com/pub/softpaq/sp172501-173000/sp172874.cva)
 
 ## Fan control
 

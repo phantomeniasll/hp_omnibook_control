@@ -8,8 +8,8 @@ check_board() {
     board=$(cat /sys/class/dmi/id/board_name)
     bios=$(cat /sys/class/dmi/id/bios_version)
     printf 'Board: %s | BIOS: %s | Kernel: %s\n' "$board" "$bios" "$release"
-    if [ "$board" != 8DA8 ] || [ "$bios" != F.11 ]; then
-        printf 'This driver supports only HP board 8DA8 with BIOS F.11.\n' >&2
+    if [ "$(cat /sys/class/dmi/id/sys_vendor)" != HP ] || [ "$board" != 8DA8 ]; then
+        printf 'This driver supports only HP board 8DA8.\n' >&2
         exit 1
     fi
 }

@@ -8,6 +8,8 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 
+#include "../../driver/omnibook-acpi.h"
+
 static bool test_inhibit;
 static bool restore_after_test;
 module_param(test_inhibit, bool, 0400);
@@ -112,8 +114,13 @@ static int __init query_init(void)
 	int mode;
 
 	if (!dmi_match(DMI_SYS_VENDOR, "HP") ||
-	    !dmi_match(DMI_BOARD_NAME, "8DA8") ||
-	    !dmi_match(DMI_BIOS_VERSION, "F.11"))
+	    !dmi_match(DMI_BOARD_NAME, "8DA8"))
+		return -ENODEV;
+
+	if (!omnibook_has_method(NULL, "\\GBCO", 0))
+		return -ENODEV;
+	if ((test_inhibit || restore_after_test) &&
+	    !omnibook_has_method(NULL, "\\SBCO", 1))
 		return -ENODEV;
 
 	read_policy("\\GTCS");

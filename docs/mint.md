@@ -4,7 +4,7 @@ A Cinnamon menu app and systemd background service for four editable fan curves.
 
 ## Check the laptop first
 
-The hardware interface was verified on an **HP OmniBook X Flip 16-ar0xxx with board 8DA8 and BIOS F.11**. Other OmniBooks may use different fan firmware. The installer and driver check the board and BIOS before enabling fan control.
+The hardware interface was verified on an **HP OmniBook X Flip 16-ar0xxx with board 8DA8 and BIOS F.11**. Other OmniBooks may use different fan firmware. The installer checks the vendor and board. The driver also checks the firmware interface before accepting fan targets. Other BIOS versions on board 8DA8 can be tried. Report the BIOS version with any results.
 
 Open a terminal in the extracted folder and run:
 
