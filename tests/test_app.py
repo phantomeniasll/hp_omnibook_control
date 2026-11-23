@@ -118,6 +118,9 @@ class BatteryLimitTests(unittest.TestCase):
                     stale = battery_limit.status()
                 self.assertFalse(stale["service_active"])
                 self.assertIn("unresponsive", stale["state"])
+                status_file.write_text("[]")
+                bad = battery_limit.status()
+                self.assertFalse(bad["service_active"])
 
 
 class ControlRunnerTests(unittest.TestCase):
@@ -171,6 +174,9 @@ class StatusTextTests(unittest.TestCase):
         }))
         self.assertIn("3,650 RPM", status_text.fan_decision({
             "state": "Custom curve", "target": 3650, "boost": False,
+        }))
+        self.assertIn("The custom curve requests 3,650 RPM.", status_text.fan_decision({
+            "state": "Custom curve", "target": 3650, "boost": True,
         }))
         self.assertIn("below the first point", status_text.fan_decision({
             "state": "Automatic", "profile": "balanced", "target": 0,

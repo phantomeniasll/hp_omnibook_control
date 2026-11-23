@@ -66,6 +66,8 @@ class OmnibookThermalApplet extends Applet.IconApplet {
         this._syncingEntries = false;
         this._pending = false;
         this._message = "";
+        this._fanSeq = 0;
+        this._chargeSeq = 0;
         this._refreshTimerId = 0;
         this._destroyed = false;
 
@@ -91,6 +93,10 @@ class OmnibookThermalApplet extends Applet.IconApplet {
     on_applet_removed_from_panel() {
         this._destroyed = true;
         this._stopTimer();
+        if (this.menu) {
+            this.menu.destroy();
+            this.menu = null;
+        }
     }
 
     _startTimer() {
@@ -359,8 +365,9 @@ class OmnibookThermalApplet extends Applet.IconApplet {
     }
 
     _refresh() {
+        const fanSeq = ++this._fanSeq;
         runCommandAsync([THERMAL_HELPER, "status"], (result) => {
-            if (this._destroyed) {
+            if (this._destroyed || fanSeq !== this._fanSeq) {
                 return;
             }
             if (result.ok) {
@@ -378,13 +385,22 @@ class OmnibookThermalApplet extends Applet.IconApplet {
                     this._hpModes = [];
                     this._fan = {};
                 }
+            } else {
+                this._activeMode = "";
+                this._fanRpm = "";
+                this._boostActive = false;
+                this._activeCurve = "unavailable";
+                this._temperatures = [];
+                this._hpModes = [];
+                this._fan = {};
             }
             this._render();
         });
 
+        const chargeSeq = ++this._chargeSeq;
         if (GLib.file_test(CHARGE_HELPER, GLib.FileTest.IS_EXECUTABLE)) {
             runCommandAsync([CHARGE_HELPER, "status"], (result) => {
-                if (this._destroyed) {
+                if (this._destroyed || chargeSeq !== this._chargeSeq) {
                     return;
                 }
                 if (result.ok) {
@@ -399,6 +415,8 @@ class OmnibookThermalApplet extends Applet.IconApplet {
                     } catch (_err) {
                         this._charge = {};
                     }
+                } else {
+                    this._charge = {};
                 }
                 this._render();
             });
@@ -416,7 +434,7 @@ class OmnibookThermalApplet extends Applet.IconApplet {
             return "Restoring HP fan control. The firmware has not confirmed the handoff.";
         }
         if (this._fan.target > 0) {
-            return this._boostActive
+            return state === "Fan Boost"
                 ? `Fan boost requests ${this._fan.target} RPM.`
                 : `The custom curve requests ${this._fan.target} RPM.`;
         }
@@ -500,10 +518,12 @@ class OmnibookThermalApplet extends Applet.IconApplet {
             return `Held by the custom soft limit at ${this._charge.limit}%. Charging resumes at ${resume}%.` + nativeNote;
         }
         if (native === "on" && this._charge.limit > 80
-                && this._charge.battery_status === "Not charging" && this._charge.capacity >= 79) {
+                && this._charge.battery_status === "Not charging"
+                && typeof this._charge.capacity === "number" && this._charge.capacity >= 79) {
             return `Held by the HP hard 80% limit (custom soft limit is set to ${this._charge.limit}%).`;
         }
-        if (this._charge.battery_status === "Charging" && this._charge.capacity < this._charge.limit) {
+        if (this._charge.battery_status === "Charging"
+                && typeof this._charge.capacity === "number" && this._charge.capacity < this._charge.limit) {
             return `Charging toward the ${this._charge.limit}% limit.` + nativeNote;
         }
         return `Soft limit on. Stops at ${this._charge.limit}% and resumes at ${resume}%.` + nativeNote;

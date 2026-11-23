@@ -111,7 +111,7 @@ ColumnLayout {
         if (fan.state === "Restoring HP fan control")
             return i18n("Restoring HP fan control. The firmware has not confirmed the handoff.");
         if (fan.target > 0)
-            return boostActive
+            return fan.state === "Fan Boost"
                 ? i18n("Fan boost requests %1 RPM.", fan.target)
                 : i18n("The custom curve requests %1 RPM.", fan.target);
         if (fan.state === "Firmware cooling")
@@ -176,9 +176,11 @@ ColumnLayout {
         if (charge.paused && charge.battery_status === "Not charging")
             return i18n("Held by the custom soft limit at %1%. Charging resumes at %2%.", charge.limit, resume) + nativeNote;
         if (charge.native_limit === "on" && charge.limit > 80
-                && charge.battery_status === "Not charging" && charge.capacity >= 79)
+                && charge.battery_status === "Not charging"
+                && typeof charge.capacity === "number" && charge.capacity >= 79)
             return i18n("Held by the HP hard 80% limit (custom soft limit is set to %1%).", charge.limit);
-        if (charge.battery_status === "Charging" && charge.capacity < charge.limit)
+        if (charge.battery_status === "Charging"
+                && typeof charge.capacity === "number" && charge.capacity < charge.limit)
             return i18n("Charging toward the %1% limit.", charge.limit) + nativeNote;
         return i18n("Soft limit on. Stops at %1% and resumes at %2%.", charge.limit, resume) + nativeNote;
     }
@@ -285,7 +287,7 @@ ColumnLayout {
 
     ModeButton {
         Layout.fillWidth: true
-        enabled: !root.pendingCommand
+        enabled: !root.pendingCommand && root.activeCurve !== "unavailable"
         selected: root.boostActive
         text: root.boostActive ? i18n("End Fan Boost") : i18n("Fan Boost (30 seconds)")
         onClicked: root.runRequest(root.boostActive ? "auto" : "boost")
@@ -330,7 +332,7 @@ ColumnLayout {
 
     ColumnLayout {
         Layout.fillWidth: true
-        visible: root.chargeAvailable || !!root.charge.battery_status
+        visible: root.chargeAvailable || !!root.charge.native_limit || !!root.charge.battery_status
 
         RowLayout {
             Layout.fillWidth: true

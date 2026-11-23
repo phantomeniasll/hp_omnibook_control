@@ -11,7 +11,7 @@ def fan_decision(status):
         return "Restoring HP fan control. The firmware has not confirmed the handoff."
     target = status.get("target") or 0
     if target > 0:
-        if status.get("boost"):
+        if state == "Fan Boost":
             return f"Fan boost requests {target:,} RPM."
         return f"The custom curve requests {target:,} RPM."
     if state == "Firmware cooling":

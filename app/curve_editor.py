@@ -42,10 +42,17 @@ class CurveEditor(QDialog):
         self.setWindowTitle("HP Fan Curves")
         self.setWindowIcon(QIcon.fromTheme("temperature-symbolic"))
         self.resize(480, 460)
-        config = load_config()
+        startup_error = ""
+        try:
+            config = load_config()
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            config = json.loads((BASE / "curves.json").read_text())
+            startup_error = f"Loaded default curves because saved config failed: {error}"
         self.profiles = config["profiles"]
         self.current = config["active"] if config["active"] in KEYS else "balanced"
         self.process = QProcess(self)
+        self.pending_charge_save = False
+        self._syncing_charge = False
 
         layout = QVBoxLayout(self)
         self.status = QLabel()
@@ -55,7 +62,7 @@ class CurveEditor(QDialog):
         self.temperatures.setWordWrap(True)
         layout.addWidget(self.temperatures)
         self.charge_controls = QGroupBox("Battery charging")
-        self.charge_values_loaded = False
+        self.charge_edited = False
         charge_form = QFormLayout(self.charge_controls)
         self.charge_limit = QSpinBox()
         self.charge_limit.setRange(2, 100)
@@ -63,8 +70,8 @@ class CurveEditor(QDialog):
         self.charge_resume = QSpinBox()
         self.charge_resume.setRange(1, 99)
         self.charge_resume.setSuffix("%")
-        self.charge_limit.valueChanged.connect(
-            lambda value: self.charge_resume.setMaximum(value - 1))
+        self.charge_limit.valueChanged.connect(self._on_charge_limit_changed)
+        self.charge_resume.valueChanged.connect(self._on_charge_resume_changed)
         self.charge_resume.setToolTip("Charging resumes at or below this battery percentage.")
         charge_form.addRow("Custom soft limit stops at", self.charge_limit)
         charge_form.addRow("Resume charging at", self.charge_resume)
@@ -127,7 +134,7 @@ class CurveEditor(QDialog):
         point_actions.addStretch()
         layout.addLayout(point_actions)
 
-        self.message = QLabel("Below the first point, HP controls the fan. "
+        self.message = QLabel(startup_error or "Below the first point, HP controls the fan. "
                               "Above it, custom curves can request up to 4,500 RPM.")
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
@@ -221,6 +228,15 @@ class CurveEditor(QDialog):
         self.add.setEnabled(self.points.rowCount() < 12)
         self.remove.setEnabled(self.points.rowCount() > 2 and self.points.currentRow() >= 0)
 
+    def _on_charge_limit_changed(self, value):
+        self.charge_resume.setMaximum(value - 1)
+        if not self._syncing_charge:
+            self.charge_edited = True
+
+    def _on_charge_resume_changed(self, _value):
+        if not self._syncing_charge:
+            self.charge_edited = True
+
     def refresh(self):
         value = load_status()
         running = bool(value)
@@ -233,9 +249,12 @@ class CurveEditor(QDialog):
         self.charge_controls.setVisible(show_charge_controls)
         if show_charge_controls:
             limit, hysteresis = battery["limit"], battery["hysteresis"]
-            if has_battery_service and not self.charge_values_loaded:
+            if has_battery_service and not self.charge_edited:
+                self._syncing_charge = True
                 self.charge_limit.setValue(limit)
+                self.charge_resume.setMaximum(limit - 1)
                 self.charge_resume.setValue(limit - hysteresis)
+                self._syncing_charge = False
             self.charge_limit.setEnabled(has_battery_service and not busy)
             self.charge_resume.setEnabled(has_battery_service and not busy)
             self.save_charge.setEnabled(has_battery_service and not busy)
@@ -251,7 +270,8 @@ class CurveEditor(QDialog):
             if has_battery_service:
                 lines.append(f"Soft limit thresholds: stop at {limit}%, resume at {limit - hysteresis}%")
             self.charge_status.setText("\n".join(lines))
-        self.charge_values_loaded = has_battery_service
+        if not has_battery_service:
+            self.charge_edited = False
         for button in (self.fan_boost, self.automatic, self.save, self.apply):
             button.setEnabled(running and not busy)
         self.fan_boost.setText("End Fan Boost" if value.get("boost") else "Fan Boost (30 s)")
@@ -272,9 +292,10 @@ class CurveEditor(QDialog):
         if not running:
             self.status.setText("Background fan control is inactive. Start omnibook-fan-curves.service.")
             return
-        temperature = "—" if value["temperature"] is None else f'{value["temperature"]:.0f}°C'
-        rpm = "—" if value["rpm"] is None else f'{value["rpm"]:,} RPM'
-        self.status.setText(f'{LABELS[value["profile"]]}   ·   {temperature}   ·   {rpm}\n{fan_decision(value)}')
+        temperature = "—" if value.get("temperature") is None else f'{value["temperature"]:.0f}°C'
+        rpm = "—" if value.get("rpm") is None else f'{value["rpm"]:,} RPM'
+        profile_label = LABELS.get(value.get("profile"), "Unknown")
+        self.status.setText(f'{profile_label}   ·   {temperature}   ·   {rpm}\n{fan_decision(value)}')
 
     def select_hp_mode(self, mode):
         for key, button in self.hp_modes.items():
@@ -283,26 +304,37 @@ class CurveEditor(QDialog):
             self.command("hp-mode", mode)
 
     def command(self, operation, argument=None):
+        if self.process.state() != QProcess.ProcessState.NotRunning:
+            return
         arguments = [str(BASE / "curve_control.py"), operation]
         if argument is not None:
             arguments.append(argument)
+        self.pending_charge_save = False
         self.process.start(str(BASE / "curve-python"), arguments)
         self.message.setText("Applying fan setting…")
         self.refresh()
 
     def save_charge_settings(self):
+        self.charge_limit.interpretText()
+        self.charge_resume.interpretText()
         limit = self.charge_limit.value()
-        self.battery_command("set", str(limit), str(limit - self.charge_resume.value()))
+        resume = min(self.charge_resume.value(), limit - 1)
+        self.pending_charge_save = True
+        self.battery_command("set", str(limit), str(limit - resume))
 
     def switch_battery_limit(self):
+        self.pending_charge_save = False
         self.battery_command("disable" if battery_limit_status()["enabled"] else "enable")
 
     def switch_hp_battery_limit(self):
         native = battery_limit_status()["native_limit"]
         if native in ("on", "off"):
+            self.pending_charge_save = False
             self.battery_command("native-disable" if native == "on" else "native-enable")
 
     def battery_command(self, *operations):
+        if self.process.state() != QProcess.ProcessState.NotRunning:
+            return
         self.process.start(str(BASE / "curve-python"),
                            [str(BASE / "battery_limit.py"), *operations])
         self.message.setText("Applying charging setting…")
@@ -319,11 +351,15 @@ class CurveEditor(QDialog):
                      json.dumps({"profiles": self.profiles, "active": self.current}))
 
     def command_error(self, _error):
+        self.pending_charge_save = False
         self.message.setText(self.process.errorString())
         self.refresh()
 
     def command_finished(self, code, _status):
         error = self.process.readAllStandardError().data().decode(errors="replace").strip()
+        if code == 0 and self.pending_charge_save:
+            self.charge_edited = False
+        self.pending_charge_save = False
         self.message.setText("Updated." if code == 0 else
                              error or "Could not apply the change.")
         self.refresh()
