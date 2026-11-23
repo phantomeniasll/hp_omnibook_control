@@ -50,26 +50,44 @@ ColumnLayout {
             radius: 2
             visible: modeButton.selected
             color: Qt.rgba(Kirigami.Theme.highlightColor.r, Kirigami.Theme.highlightColor.g,
-                           Kirigami.Theme.highlightColor.b, 0.13)
+                           Kirigami.Theme.highlightColor.b, 0.30)
             border.color: Qt.rgba(Kirigami.Theme.highlightColor.r, Kirigami.Theme.highlightColor.g,
-                                  Kirigami.Theme.highlightColor.b, 0.48)
+                                  Kirigami.Theme.highlightColor.b, 0.85)
         }
     }
 
     component PercentField: QQC2.TextField {
         id: field
-        horizontalAlignment: TextInput.AlignHCenter
+        implicitWidth: Kirigami.Units.gridUnit * 4
+        leftPadding: Kirigami.Units.smallSpacing * 2
+        rightPadding: unitLabel.implicitWidth + Kirigami.Units.smallSpacing * 3
+        horizontalAlignment: TextInput.AlignRight
+        verticalAlignment: TextInput.AlignVCenter
         selectByMouse: true
         inputMethodHints: Qt.ImhDigitsOnly
-        color: Kirigami.Theme.textColor
+        color: fieldPalette.buttonText
+
+        SystemPalette { id: fieldPalette; colorGroup: SystemPalette.Active }
+
         background: Rectangle {
-            implicitWidth: Kirigami.Units.gridUnit * 3
             implicitHeight: Kirigami.Units.gridUnit + Kirigami.Units.smallSpacing
             radius: 2
-            color: Qt.lighter(Kirigami.Theme.backgroundColor, 1.05)
+            color: Qt.tint(fieldPalette.button,
+                           Qt.rgba(fieldPalette.light.r, fieldPalette.light.g, fieldPalette.light.b, 0.48))
             border.color: field.activeFocus ? Kirigami.Theme.highlightColor
-                : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g,
-                          Kirigami.Theme.textColor.b, 0.35)
+                : fieldPalette.mid
+        }
+
+        Text {
+            id: unitLabel
+            anchors.right: parent.right
+            anchors.rightMargin: Kirigami.Units.smallSpacing * 2
+            anchors.verticalCenter: parent.verticalCenter
+            text: i18n("%")
+            font: field.font
+            color: field.color
+            opacity: 0.7
+            Accessible.ignored: true
         }
     }
 
@@ -309,18 +327,16 @@ ColumnLayout {
             text: root.chargeDecision()
         }
 
-        GridLayout {
-            columns: 4
-            Layout.fillWidth: true
+        RowLayout {
+            spacing: Kirigami.Units.smallSpacing * 2
             visible: root.chargeAvailable
             enabled: !root.pendingCommand
 
             PlasmaComponents.Label {
-                text: i18n("Stop at (%)")
+                text: i18n("Stop at")
             }
             PercentField {
                 id: stopAt
-                Layout.fillWidth: true
                 text: "80"
                 Accessible.name: i18n("Stop charging percentage")
                 validator: IntValidator { bottom: 2; top: 100 }
@@ -328,11 +344,11 @@ ColumnLayout {
             }
 
             PlasmaComponents.Label {
-                text: i18n("Resume at (%)")
+                Layout.leftMargin: Kirigami.Units.smallSpacing
+                text: i18n("Resume at")
             }
             PercentField {
                 id: resumeAt
-                Layout.fillWidth: true
                 text: "75"
                 Accessible.name: i18n("Resume charging percentage")
                 validator: IntValidator { bottom: 1; top: Math.max(1, root.stopPercent - 1) }
