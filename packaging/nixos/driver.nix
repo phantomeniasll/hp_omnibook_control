@@ -8,6 +8,7 @@ stdenv.mkDerivation {
     fileset = lib.fileset.unions [
       ../../driver/Makefile
       ../../driver/omnibook-fan-probe.c
+      ../../driver/omnibook-charge-control.c
     ];
   };
 
@@ -27,6 +28,8 @@ stdenv.mkDerivation {
     runHook preInstall
     install -Dm644 omnibook-fan-probe.ko \
       "$out/lib/modules/${kernel.modDirVersion}/omnibook-fan-probe.ko"
+    install -Dm644 omnibook-charge-control.ko \
+      "$out/lib/modules/${kernel.modDirVersion}/omnibook-charge-control.ko"
     runHook postInstall
   '';
 

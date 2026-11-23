@@ -3,13 +3,21 @@ set -eu
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 [ "$(id -u)" -eq 0 ] || { printf 'Run with sudo.\n' >&2; exit 1; }
 service=omnibook-fan-curves.service
+battery_service=omnibook-charge-limit.service
 if [ -f "/etc/systemd/system/$service" ]; then
     systemctl disable --now "$service"
+fi
+if [ -f "/etc/systemd/system/$battery_service" ]; then
+    systemctl disable --now "$battery_service"
 fi
 if [ -d /sys/module/omnibook_fan_probe ]; then
     rmmod omnibook_fan_probe
 fi
-rm -f "/etc/systemd/system/$service" /usr/local/share/applications/hp-fan-curves.desktop
+if [ -d /sys/module/omnibook_charge_control ]; then
+    rmmod omnibook_charge_control
+fi
+rm -f "/etc/systemd/system/$service" "/etc/systemd/system/$battery_service" \
+    /usr/local/share/applications/hp-fan-curves.desktop /usr/local/bin/hp-charge-limit
 if [ -d /usr/local/lib/omnibook-fan-curves ]; then
     rm -r /usr/local/lib/omnibook-fan-curves
 fi

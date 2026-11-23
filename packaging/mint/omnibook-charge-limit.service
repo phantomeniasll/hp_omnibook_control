@@ -1,0 +1,17 @@
+[Unit]
+Description=HP OmniBook 80 percent charge limit
+After=systemd-modules-load.service
+ConditionPathExists=/sys/class/power_supply/BAT0
+
+[Service]
+ExecStart=/usr/local/lib/omnibook-fan-curves/curve-python /usr/local/lib/omnibook-fan-curves/battery_limit.py run
+StateDirectory=omnibook-charge-limit
+RuntimeDirectory=omnibook-charge-limit
+StateDirectoryMode=0755
+RuntimeDirectoryMode=0755
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

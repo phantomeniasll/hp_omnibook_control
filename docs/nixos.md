@@ -13,10 +13,13 @@ inputs.omnibook-fan-curves.nixosModules.default
 {
   services.omnibookFanCurves.enable = true;
   services.omnibookFanCurves.plasmaWidget = true;
+  services.omnibookFanCurves.batteryLimit.enable = true;
 }
 ```
 
 Set `plasmaWidget = false` on other desktops. Rebuild using your normal NixOS flake workflow. The module builds against the host's selected kernel and adds **HP Fan Curves** to the application menu. On Plasma 6, add **HP Thermal Mode** through **Add Widgets** to get quick profile actions, sensor readings, and access to the editor.
+
+With the battery service installed, use **Set 80% Charge Limit** in the editor or run `sudo hp-charge-limit enable`. The charge setting is off on a fresh installation. See [power management](power-management.md) for runtime and suspend behavior.
 
 This package's Plasma integration is a standalone widget. It is compatible with the stock Power & Battery widget and does not require modifying Plasma Shell or PowerDevil. The software exposes HP's separate modes if the running `hp-wmi` driver offers readable profiles. The [firmware notes](firmware.md) explain the readback issue on some kernels.
 

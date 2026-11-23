@@ -20,6 +20,7 @@ except ImportError:
 
 from curve_control import BASE, KEYS, MAX_RPM, MIN_RPM, check_profiles, load_config, load_status, read_hp_mode
 from temperature_status import readings
+from battery_limit import STATUS as BATTERY_LIMIT_STATUS, status as battery_limit_status
 
 LABELS = {"auto": "Automatic", "quiet": "Quiet", "balanced": "Balanced",
           "cool": "Cool", "performance": "Performance"}
@@ -44,6 +45,9 @@ class CurveEditor(QDialog):
         self.temperatures = QLabel()
         self.temperatures.setWordWrap(True)
         layout.addWidget(self.temperatures)
+        self.battery_limit = QPushButton()
+        self.battery_limit.clicked.connect(self.switch_battery_limit)
+        layout.addWidget(self.battery_limit)
 
         hp_row = QHBoxLayout()
         self.hp_modes = {}
@@ -169,6 +173,14 @@ class CurveEditor(QDialog):
         value = load_status()
         running = bool(value)
         busy = self.process.state() != QProcess.ProcessState.NotRunning
+        has_battery_service = BATTERY_LIMIT_STATUS.is_file()
+        self.battery_limit.setVisible(has_battery_service)
+        if has_battery_service:
+            battery = battery_limit_status()
+            self.battery_limit.setText("Turn Off 80% Charge Limit" if battery["enabled"] else
+                                       "Set 80% Charge Limit")
+            self.battery_limit.setToolTip(battery.get("state", ""))
+            self.battery_limit.setEnabled(not busy)
         for button in (self.fan_boost, self.automatic, self.save, self.apply):
             button.setEnabled(running and not busy)
         self.fan_boost.setText("End Fan Boost" if value.get("boost") else "Fan Boost (30 s)")
@@ -198,6 +210,13 @@ class CurveEditor(QDialog):
         if argument is not None:
             arguments.append(argument)
         self.process.start(PKEXEC, arguments)
+        self.message.setText("Waiting for authorization…")
+        self.refresh()
+
+    def switch_battery_limit(self):
+        operation = "disable" if battery_limit_status()["enabled"] else "enable"
+        self.process.start(PKEXEC, ["--disable-internal-agent", str(BASE / "curve-python"),
+                                    str(BASE / "battery_limit.py"), operation])
         self.message.setText("Waiting for authorization…")
         self.refresh()
 

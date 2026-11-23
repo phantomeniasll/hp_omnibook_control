@@ -14,7 +14,9 @@ A desktop editor and background fan controller for the **HP OmniBook X Flip 16-a
 - **Fan Boost** requests up to 4,500 RPM for 30 seconds.
 - The editor shows live CPU, GPU, SSD, system, and Wi-Fi temperatures where the kernel exposes them.
 - The separate HP firmware buttons use the kernel's readable HP profile interface when available.
+- The optional Linux charge limiter pauses at 80% and resumes at 75% while the service is running.
 - The [power management notes](docs/power-management.md) cover charge thresholds and the read-only battery research tool.
+- The [HP companion notes](docs/hp-companion.md) map the Windows app's other features to Linux interfaces and include a Windows capture tool.
 
 On the original hardware under NixOS, a custom curve raised the observed fan speed from 3,150 to 3,550 RPM. Returning to Automatic restored 3,150 RPM. Fan Boost reached 4,450 RPM against a 4,500 RPM request and returned to firmware control after its timeout. The Mint instructions are an adaptation. Hardware testing on Mint is still needed.
 

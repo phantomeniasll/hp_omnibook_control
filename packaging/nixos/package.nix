@@ -31,11 +31,18 @@ stdenv.mkDerivation {
     substituteInPlace "$app/curve_editor.py" --replace-fail '/usr/bin/pkexec' '/run/wrappers/bin/pkexec'
     install -Dm644 "${driver}/lib/modules/${driver.kernelRelease}/omnibook-fan-probe.ko" \
       "$app/${driver.kernelRelease}/omnibook-fan-probe.ko"
+    install -Dm644 "${driver}/lib/modules/${driver.kernelRelease}/omnibook-charge-control.ko" \
+      "$app/${driver.kernelRelease}/omnibook-charge-control.ko"
     cat >"$out/bin/hp-fan-curves" <<EOF
 #!/bin/sh
 exec "$app/open-curve-editor" "\$@"
 EOF
     chmod 755 "$out/bin/hp-fan-curves"
+    cat >"$out/bin/hp-charge-limit" <<EOF
+#!/bin/sh
+exec "$app/curve-python" "$app/battery_limit.py" "\$@"
+EOF
+    chmod 755 "$out/bin/hp-charge-limit"
     install -Dm644 packaging/mint/hp-fan-curves.desktop "$out/share/applications/hp-fan-curves.desktop"
     substituteInPlace "$out/share/applications/hp-fan-curves.desktop" \
       --replace-fail /usr/local/lib/omnibook-fan-curves/open-curve-editor "$out/bin/hp-fan-curves"
