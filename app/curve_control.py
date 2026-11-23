@@ -182,7 +182,7 @@ def run():
             try:
                 config = load_config()
                 status["profile"] = profile = config["active"]
-                status["boost"] = boosting = boost_deadline() > now
+                status["boost"] = boost_requested = boost_deadline() > now
                 status["rpm"] = int(RPM.read_text())
                 cpu = sensor(Path("/sys/class/hwmon"), "name", "k10temp", "temp1_input")
                 acpi = sensor(Path("/sys/class/thermal"), "type", "acpitz", "temp")
@@ -190,18 +190,21 @@ def run():
                 if not 0 < cpu < 120000 or not 0 < acpi < 120000:
                     raise OSError("Invalid temperature reading")
                 hot = cpu >= (82000 if hot else 85000) or acpi >= (72000 if hot else 75000)
+                boosting = boost_requested and not hot
                 requested = MAX_RPM if boosting else (
                     0 if profile == "auto" else curve_rpm(config["profiles"][profile], cpu / 1000)
                 )
-                if hot:
-                    requested = 0
+                if boost_requested and hot and not requested:
                     status["state"] = "Firmware cooling"
                 if requested:
                     if abs(requested - last_target) == 50 and not boosting:
                         requested = last_target
                     ensure_module()
                     try:
-                        (PARAM / "target").write_text(f"{requested}\n")
+                        target = PARAM / "target"
+                        if boosting and (PARAM / "boost_target").exists():
+                            target = PARAM / "boost_target"
+                        target.write_text(f"{requested}\n")
                         last_target = requested
                         status["target"] = requested
                         status["state"] = "Fan Boost" if boosting else "Custom curve"

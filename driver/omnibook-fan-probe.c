@@ -22,7 +22,9 @@
 #define MAX_OWNERSHIP (120 * HZ)
 #define FIRMWARE_INTERVAL (8 * HZ)
 #define ACPI_TEMP_MIN 2732
-#define ACPI_TEMP_LIMIT 3482
+#define ACPI_TEMP_MAX 3932
+#define ACPI_BOOST_LIMIT 3482
+#define ACPI_FLOOR_RISE 20
 #define MIN_CURVE_RPM 3000
 #define CURVE_LEASE_SECONDS 6
 
@@ -34,9 +36,12 @@ static bool active;
 static bool owns_override;
 static bool recovering;
 static bool cooling_off;
+static bool refresh_floor;
+static bool active_boost;
 static bool suspended;
 static int active_target;
 static int firmware_floor;
+static int firmware_temperature;
 static unsigned long lease_until;
 static unsigned long ownership_until;
 static unsigned long firmware_until;
@@ -106,12 +111,21 @@ static int clear_override(void)
 	return -EIO;
 }
 
-static bool safe_to_boost(void)
+static int read_temperature(void)
 {
 	unsigned long long temperature;
 
-	return ACPI_SUCCESS(acpi_evaluate_integer(NULL, "\\_TZ_.TZS0._TMP", NULL, &temperature)) &&
-	       temperature >= ACPI_TEMP_MIN && temperature < ACPI_TEMP_LIMIT;
+	if (ACPI_FAILURE(acpi_evaluate_integer(NULL, "\\_TZ_.TZS0._TMP", NULL, &temperature)) ||
+	    temperature < ACPI_TEMP_MIN || temperature >= ACPI_TEMP_MAX)
+		return -EIO;
+	return temperature;
+}
+
+static bool floor_needs_refresh(int temperature)
+{
+	return temperature >= ACPI_BOOST_LIMIT &&
+	       (firmware_temperature < ACPI_BOOST_LIMIT ||
+		temperature >= firmware_temperature + ACPI_FLOOR_RISE);
 }
 
 static void monitor_override(struct work_struct *work);
@@ -143,10 +157,11 @@ static int restore_fan(void)
 	}
 	WRITE_ONCE(active, false);
 	recovering = false;
-	if (time_after_eq(jiffies, ownership_until)) {
+	if (refresh_floor || time_after_eq(jiffies, ownership_until)) {
 		cooling_off = true;
 		firmware_until = jiffies + FIRMWARE_INTERVAL;
 	}
+	refresh_floor = false;
 	owns_override = false;
 	pr_info("Automatic fan control restored\n");
 	module_put(THIS_MODULE);
@@ -155,15 +170,22 @@ static int restore_fan(void)
 
 static void monitor_override(struct work_struct *work)
 {
-	int tachometer, control;
+	int tachometer, control, temperature;
 
 	mutex_lock(&fan_lock);
 	if (!ready || !owns_override)
 		goto out;
 
 	if (recovering || !active || time_after_eq(jiffies, lease_until) ||
-	    time_after_eq(jiffies, ownership_until) || !safe_to_boost())
+	    time_after_eq(jiffies, ownership_until))
 		goto restore;
+	temperature = read_temperature();
+	if (temperature < 0 || (active_boost && temperature >= ACPI_BOOST_LIMIT))
+		goto restore;
+	if (!active_boost && floor_needs_refresh(temperature)) {
+		refresh_floor = true;
+		goto restore;
+	}
 	tachometer = mailbox_read(FAN_TACHOMETER);
 	control = mailbox_read(FAN_CONTROL);
 	if (tachometer <= 0 || tachometer == U8_MAX ||
@@ -196,7 +218,8 @@ module_param_cb(cancel, &cancel_boost_ops, NULL, 0200);
 
 static int set_curve_target(const char *value, const struct kernel_param *parameter)
 {
-	int rpm, control, tachometer, current_target, result;
+	bool boosting = parameter->arg != NULL;
+	int rpm, control, tachometer, current_target, temperature, result;
 
 	if (kstrtoint(value, 10, &rpm) || rpm < MIN_CURVE_RPM ||
 	    rpm > REQUESTED_RPM || rpm % RPM_PER_UNIT)
@@ -213,10 +236,13 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 		goto out;
 	if (recovering)
 		goto out;
-	if (!safe_to_boost()) {
-		restore_fan();
-		goto out;
+	temperature = read_temperature();
+	if (temperature < 0) {
+		result = temperature;
+		goto restore;
 	}
+	if (boosting && temperature >= ACPI_BOOST_LIMIT)
+		goto restore;
 	if (owns_override && (!active || time_after_eq(jiffies, ownership_until) ||
 			      time_after_eq(jiffies, lease_until))) {
 		restore_fan();
@@ -228,6 +254,11 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 		goto out;
 	}
 	cooling_off = false;
+	if (owns_override && !boosting && floor_needs_refresh(temperature)) {
+		refresh_floor = true;
+		result = -EAGAIN;
+		goto restore;
+	}
 
 	control = mailbox_read(FAN_CONTROL);
 	tachometer = mailbox_read(FAN_TACHOMETER);
@@ -242,6 +273,7 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 			goto out;
 		}
 		firmware_floor = max(tachometer, current_target) * RPM_PER_UNIT;
+		firmware_temperature = temperature;
 	}
 	if (rpm <= firmware_floor) {
 		result = -EALREADY;
@@ -267,6 +299,7 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 		goto reject;
 
 	active_target = rpm;
+	active_boost = boosting;
 	lease_until = jiffies + CURVE_LEASE_SECONDS * HZ;
 	if (!active) {
 		WRITE_ONCE(active, true);
@@ -287,7 +320,9 @@ out:
 }
 
 static const struct kernel_param_ops curve_target_ops = { .set = set_curve_target };
+static bool boost_request;
 module_param_cb(target, &curve_target_ops, NULL, 0200);
+module_param_cb(boost_target, &curve_target_ops, &boost_request, 0200);
 
 static int pause_for_sleep(struct notifier_block *notifier, unsigned long event, void *data)
 {

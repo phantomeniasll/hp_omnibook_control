@@ -34,7 +34,7 @@ Open **HP Fan Curves** from the Cinnamon application menu. Right-click the menu 
 - **Fan Boost** requests 4,500 RPM for up to 30 seconds, then resumes the selected fan mode.
 - The separate **HP firmware modes** buttons are enabled when the running HP driver exposes a readable profile. Older kernels may leave them disabled. The installer does not patch or replace the stock HP driver.
 
-The fan returns to firmware control below the curve's first temperature, when HP already calls for at least as much cooling, during a safety-temperature cutoff, or if the service stops renewing the override. Curves use target points from 3,000 to 4,500 RPM in 50 RPM steps. Temperatures must increase strictly between 30°C and 82°C.
+The fan returns to firmware control below the curve's first temperature, when HP already calls for at least as much cooling, when sensor readings fail, or if the service stops renewing the override. A custom curve can raise the fan speed above HP’s sampled speed at higher temperatures. Fan Boost has a separate temperature cutoff. Curves use target points from 3,000 to 4,500 RPM in 50 RPM steps. Temperatures must increase strictly between 30°C and 82°C.
 
 ## Kernel updates and Secure Boot
 
