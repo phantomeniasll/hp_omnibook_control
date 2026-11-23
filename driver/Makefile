@@ -5,7 +5,7 @@ IASL ?= iasl
 quiet_cmd_omnibook_asl = IASL    $@
       cmd_omnibook_asl = $(IASL) -tc -p $(basename $@) $<
 
-targets += omnibook_native_read.hex
+targets += omnibook_native_read.hex omnibook_native_read.aml
 $(obj)/omnibook_native_read.hex: $(src)/omnibook_native_read.asl FORCE
 	$(call if_changed,omnibook_asl)
 

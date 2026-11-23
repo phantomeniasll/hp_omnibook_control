@@ -112,38 +112,26 @@ out:
 	mutex_unlock(&charge_lock);
 }
 
-static int charge_set(const char *value, const struct kernel_param *parameter)
+static int inhibit_charge_locked(void)
 {
-	bool requested;
-	int mode, result;
+	int mode;
 
-	if (kstrtobool(value, &requested))
-		return -EINVAL;
-	mutex_lock(&charge_lock);
-	if (!ready) {
-		result = -ENODEV;
-		goto out;
-	}
-	if (!requested) {
-		result = restore_charge();
-		goto out;
-	}
-	result = -EOPNOTSUPP;
 	if (write_rejected)
-		goto out;
-	result = -EBUSY;
+		return -EOPNOTSUPP;
 	if (suspended)
-		goto out;
+		return -EBUSY;
 	if (owned) {
-		if (inhibited && time_before(jiffies, lease_until))
-			goto renew;
-		goto out;
+		if (!inhibited || !time_before(jiffies, lease_until))
+			return -EBUSY;
+		goto renew;
 	}
 	mode = gbco();
+	if (mode < 0)
+		return mode;
 	if (mode != 0 && mode != 1)
-		goto out;
+		return -EBUSY;
 	if (!try_module_get(THIS_MODULE))
-		goto out;
+		return -ENODEV;
 	owned = true;
 	if (!sbco(CHARGE_INHIBIT)) {
 		mode = gbco();
@@ -157,17 +145,31 @@ static int charge_set(const char *value, const struct kernel_param *parameter)
 	if (!write_verified) {
 		write_rejected = true;
 		pr_warn("Firmware did not confirm the charge command; restoring automatic charging\n");
-		result = -EOPNOTSUPP;
-	} else {
-		pr_warn_ratelimited("Charge command failed; restoring automatic charging\n");
-		result = -EIO;
+		restore_charge();
+		return -EOPNOTSUPP;
 	}
+	pr_warn_ratelimited("Charge command failed; restoring automatic charging\n");
 	restore_charge();
-	goto out;
+	return -EIO;
 renew:
 	lease_until = jiffies + LEASE_TIME;
 	mod_delayed_work(system_wq, &expiry, LEASE_TIME);
-	result = 0;
+	return 0;
+}
+
+static int charge_set(const char *value, const struct kernel_param *parameter)
+{
+	bool requested;
+	int result;
+
+	if (kstrtobool(value, &requested))
+		return -EINVAL;
+	mutex_lock(&charge_lock);
+	if (!ready) {
+		result = -ENODEV;
+		goto out;
+	}
+	result = requested ? inhibit_charge_locked() : restore_charge();
 out:
 	mutex_unlock(&charge_lock);
 	return result;
@@ -191,7 +193,7 @@ module_param_cb(inhibit, &charge_ops, NULL, 0644);
 
 static int native_limit_set(const char *value, const struct kernel_param *parameter)
 {
-	bool requested;
+	bool requested, was_inhibited = false;
 	int previous, written, result;
 
 	if (kstrtobool(value, &requested))
@@ -213,6 +215,7 @@ static int native_limit_set(const char *value, const struct kernel_param *parame
 		result = 0;
 		goto out;
 	}
+	was_inhibited = inhibited;
 	if (restore_charge())
 		goto out;
 
@@ -220,7 +223,7 @@ static int native_limit_set(const char *value, const struct kernel_param *parame
 	native_state = native_read(native_instance);
 	if (!written && native_state == requested) {
 		result = 0;
-		goto out;
+		goto reapply;
 	}
 	if (written || native_state != previous) {
 		written = native_write(previous);
@@ -228,6 +231,9 @@ static int native_limit_set(const char *value, const struct kernel_param *parame
 		if (written || native_state != previous)
 			pr_warn("Could not verify restoration of Battery Health Manager\n");
 	}
+reapply:
+	if (was_inhibited && !owned && inhibit_charge_locked())
+		pr_warn_ratelimited("Could not re-apply active charge pause after Battery Health Manager update\n");
 out:
 	mutex_unlock(&charge_lock);
 	return result;
@@ -260,6 +266,7 @@ static int suspend_charge(struct notifier_block *block, unsigned long event, voi
 	switch (event) {
 	case PM_SUSPEND_PREPARE:
 	case PM_HIBERNATION_PREPARE:
+	case PM_RESTORE_PREPARE:
 		suspended = true;
 		result = restore_charge();
 		if (result)
@@ -267,6 +274,7 @@ static int suspend_charge(struct notifier_block *block, unsigned long event, voi
 		break;
 	case PM_POST_SUSPEND:
 	case PM_POST_HIBERNATION:
+	case PM_POST_RESTORE:
 		suspended = false;
 		if (native_instance >= 0)
 			native_state = native_read(native_instance);

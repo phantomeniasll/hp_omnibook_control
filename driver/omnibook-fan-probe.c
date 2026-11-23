@@ -289,8 +289,10 @@ static int set_curve_target(const char *value, const struct kernel_param *parame
 		goto restore;
 
 	if (!owns_override) {
-		if (!try_module_get(THIS_MODULE))
+		if (!try_module_get(THIS_MODULE)) {
+			result = -ENODEV;
 			goto out;
+		}
 		owns_override = true;
 		ownership_until = jiffies + MAX_OWNERSHIP;
 		spinup_until = jiffies + SPINUP_GRACE;
@@ -342,12 +344,14 @@ static int pause_for_sleep(struct notifier_block *notifier, unsigned long event,
 	int result = 0;
 
 	mutex_lock(&fan_lock);
-	if (ready && (event == PM_SUSPEND_PREPARE || event == PM_HIBERNATION_PREPARE)) {
+	if (ready && (event == PM_SUSPEND_PREPARE || event == PM_HIBERNATION_PREPARE ||
+		      event == PM_RESTORE_PREPARE)) {
 		suspended = true;
 		result = restore_fan();
 		if (result)
 			suspended = false;
-	} else if (event == PM_POST_SUSPEND || event == PM_POST_HIBERNATION) {
+	} else if (event == PM_POST_SUSPEND || event == PM_POST_HIBERNATION ||
+		   event == PM_POST_RESTORE) {
 		suspended = false;
 	}
 	mutex_unlock(&fan_lock);
