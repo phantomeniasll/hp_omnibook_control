@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+kver="${1:-}"
+case "$kver" in
+    ""|*[!A-Za-z0-9._+-]*|.*|*-) exit 0 ;;
+esac
+
+[ "$kver" != "$(uname -r)" ] || exit 0
+target="/usr/local/lib/omnibook-fan-curves/$kver"
+if [ -d "$target" ] && [ ! -L "$target" ]; then
+    rm -rf -- "$target"
+fi

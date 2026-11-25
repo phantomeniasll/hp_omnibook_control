@@ -255,6 +255,14 @@ class MintAppletMetadataTests(unittest.TestCase):
         self.assertTrue((meta_path.parent / "omnibook-fan-symbolic.svg").is_file())
         self.assertTrue((meta_path.parent / "icon.png").is_file())
 
+    def test_mint_kernel_hooks_exist_and_parse(self):
+        import subprocess
+        for name in ("kernel-postinst", "kernel-postrm"):
+            hook = ROOT / "packaging/mint" / name
+            self.assertTrue(hook.is_file())
+            result = subprocess.run(["sh", "-n", str(hook)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
