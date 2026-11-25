@@ -7,6 +7,8 @@ A desktop editor and background fan controller for the **HP OmniBook X Flip 16-a
 | Linux Mint 22 Cinnamon | [Install the Cinnamon application and background service](docs/mint.md) |
 | NixOS | [Use the NixOS module and optional Plasma 6 widget](docs/nixos.md) |
 
+![Panel widget showing fan speed, HP thermal modes, custom fan curves, battery charging limits, and live temperatures](docs/thermal-controls.png)
+
 ## What works
 
 - **Quiet, Balanced, Cool, and Performance** each have their own editable curve. Automatic is the initial selection.
