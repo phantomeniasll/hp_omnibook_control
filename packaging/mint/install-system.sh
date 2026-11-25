@@ -21,10 +21,13 @@ desktop=/usr/local/share/applications/hp-fan-curves.desktop
 cli=/usr/local/bin/hp-charge-limit
 applet_uuid=omnibook-thermal@omnibook
 applet_dest="/usr/share/cinnamon/applets/$applet_uuid"
+kpostinst=/etc/kernel/postinst.d/omnibook-fan-curves
+khpostinst=/etc/kernel/header_postinst.d/omnibook-fan-curves
+kpostrm=/etc/kernel/postrm.d/omnibook-fan-curves
 fan_link="$units/multi-user.target.wants/$fan"
 charge_link="$units/multi-user.target.wants/$charge"
 socket_link="$units/sockets.target.wants/$socket"
-managed_files="$units/$fan $units/$charge $units/$socket $units/$listener $units/$legacy $desktop $cli $fan_link $charge_link $socket_link"
+managed_files="$units/$fan $units/$charge $units/$socket $units/$listener $units/$legacy $desktop $cli $kpostinst $khpostinst $kpostrm $fan_link $charge_link $socket_link"
 
 install -d -m755 /usr/local/lib
 staging=$(mktemp -d /usr/local/lib/.omnibook-upgrade.XXXXXX)
@@ -95,14 +98,33 @@ stage_module "$1" "$fan_module" "$2" omnibook_fan_probe
 if [ "$#" -eq 4 ]; then
     stage_module "$3" "$charge_module" "$4" omnibook_charge_control
 fi
+# Keep the verified modules from earlier installs and kernel hooks for other releases.
+for previous in "$dest"/*; do
+    [ -d "$previous" ] && [ ! -L "$previous" ] || continue
+    previous_release=${previous##*/}
+    [ "$previous_release" != "$release" ] || continue
+    previous_fan="$previous/omnibook-fan-probe.ko"
+    previous_charge="$previous/omnibook-charge-control.ko"
+    [ -f "$previous_fan" ] && [ ! -L "$previous_fan" ] || continue
+    install -d -m755 "$next/$previous_release"
+    install -p -m644 "$previous_fan" "$next/$previous_release/"
+    if [ "$#" -eq 4 ] && [ -f "$previous_charge" ] && [ ! -L "$previous_charge" ]; then
+        install -p -m644 "$previous_charge" "$next/$previous_release/"
+    fi
+done
 install -m644 "$source/app/"*.py "$source/app/curves.json" "$next/"
 install -m755 "$source/app/curve-python" "$source/app/open-curve-editor" "$source/app/thermal" "$next/"
+install -d -m755 "$next/driver-src"
+install -m644 "$source/driver/Makefile" "$source/driver/"*.c "$source/driver/"*.h \
+    "$source/driver/"*.asl "$next/driver-src/"
 install -d -m755 "$staging/new-applet"
 install -m644 "$source/packaging/mint/cinnamon-applet/$applet_uuid/"* "$staging/new-applet/"
 install -m644 "$source/packaging/mint/$fan" "$source/packaging/mint/$charge" \
     "$source/packaging/mint/$socket" "$source/packaging/mint/$listener" "$staging/units/"
 install -m644 "$source/packaging/mint/hp-fan-curves.desktop" "$staging/desktop"
 install -m755 "$source/packaging/mint/hp-charge-limit" "$staging/cli"
+install -m755 "$source/packaging/mint/kernel-postinst" "$staging/kpostinst"
+install -m755 "$source/packaging/mint/kernel-postrm" "$staging/kpostrm"
 # Compile without writing bytecode into the installation.
 /usr/bin/python3 -c 'from pathlib import Path; import sys
 for path in Path(sys.argv[1]).glob("*.py"):
@@ -158,12 +180,16 @@ fi
 mv -T -- "$staging/new-applet" "$applet_dest"
 groupadd --force --system omnibook-control
 install -d -m755 /usr/local/share/applications /usr/local/bin \
+    /etc/kernel/postinst.d /etc/kernel/header_postinst.d /etc/kernel/postrm.d \
     "$units/multi-user.target.wants" "$units/sockets.target.wants"
 for unit in "$fan" "$socket" "$listener"; do
     install -m644 "$staging/units/$unit" "$units/$unit"
 done
 rm -f -- "$units/$legacy"
 install -m644 "$staging/desktop" "$desktop"
+install -m755 "$staging/kpostinst" "$kpostinst"
+install -m755 "$staging/kpostinst" "$khpostinst"
+install -m755 "$staging/kpostrm" "$kpostrm"
 if [ -f "$dest/$release/omnibook-charge-control.ko" ]; then
     install -m644 "$staging/units/$charge" "$units/$charge"
     install -m755 "$staging/cli" "$cli"

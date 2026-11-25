@@ -1,5 +1,8 @@
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -254,6 +257,116 @@ class MintAppletMetadataTests(unittest.TestCase):
         self.assertTrue((meta_path.parent / "stylesheet.css").is_file())
         self.assertTrue((meta_path.parent / "omnibook-fan-symbolic.svg").is_file())
         self.assertTrue((meta_path.parent / "icon.png").is_file())
+
+
+class MintKernelHookTests(unittest.TestCase):
+    kernel = "7.0.0-test"
+    fan_module = "omnibook-fan-probe.ko"
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.modules = self.root / "usr/local/lib/omnibook-fan-curves"
+        self.write_file("usr/local/lib/omnibook-fan-curves/driver-src/Makefile")
+        self.write_file(f"lib/modules/{self.kernel}/build/Makefile")
+        self.write_file("sys/class/dmi/id/sys_vendor", "HP\n")
+        self.write_file("sys/class/dmi/id/board_name", "8DA8\n")
+        (self.root / "run").mkdir()
+        self.stub("flock", "exit 0")
+        self.stub("modinfo", """case "$2" in
+            name) printf 'omnibook_fan_probe\n' ;;
+            vermagic) printf '%s SMP\n' "$HOOK_KERNEL" ;;
+            signer) if [ "$(cat "$3")" = signed ]; then printf 'Test MOK\n'; fi ;;
+        esac""")
+
+    def write_file(self, relative_path, content=""):
+        path = self.root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        return path
+
+    def stub(self, command, body):
+        shell = shutil.which("sh")
+        self.write_file(f"bin/{command}", f"#!{shell}\n{body}\n").chmod(0o755)
+
+    def run_hook(self, name="kernel-postinst", maint_params=""):
+        script = (ROOT / "packaging/mint" / name).read_text()
+        for directory in ("/usr/local/lib", "/lib/modules", "/sys/", "/etc/systemd", "/run/"):
+            script = script.replace(directory, f"{self.root}{directory}")
+        script = script.replace(
+            "export PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+            'export PATH="$HOOK_TEST_BIN:$PATH"',
+        )
+        hook = self.write_file(name, script)
+        return subprocess.run(
+            ["sh", str(hook), self.kernel],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "HOOK_KERNEL": self.kernel,
+                "HOOK_TEST_BIN": str(self.root / "bin"),
+                "DEB_MAINT_PARAMS": maint_params,
+            },
+        )
+
+    def test_mint_kernel_hooks_exist_and_parse(self):
+        for name in ("kernel-postinst", "kernel-postrm"):
+            hook = ROOT / "packaging/mint" / name
+            self.assertTrue(hook.is_file())
+            result = subprocess.run(["sh", "-n", str(hook)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_postinst_reports_setup_failure_without_failing_the_package(self):
+        self.stub("make", "exit 1")
+        self.stub("mktemp", "exit 1")
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("automatic module rebuild failed", result.stderr)
+
+    def test_postinst_builds_and_reuses_a_module_without_secure_boot(self):
+        self.stub("make", f"""build=${{3#M=}}
+            printf built > "$build/{self.fan_module}"
+        """)
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.modules / self.kernel / self.fan_module).read_text(), "built")
+        self.stub("make", "exit 1")
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+
+    def test_postinst_requires_manual_signing_and_preserves_signed_modules(self):
+        secure_boot = self.write_file(
+            "sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
+        )
+        secure_boot.write_bytes(bytes((7, 0, 0, 0, 1)))
+        self.stub("make", "exit 1")
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("requires manually building and signing", result.stderr)
+        module = self.modules / self.kernel / self.fan_module
+        self.assertFalse(module.exists())
+
+        module.parent.mkdir()
+        module.write_text("signed")
+        os.utime(module, (1, 1))
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(module.read_text(), "signed")
+
+    def test_postrm_preserves_modules_during_same_release_package_upgrade(self):
+        module_dir = self.modules / self.kernel
+        module_dir.mkdir()
+        self.stub("uname", "printf 'other-kernel\n'")
+        result = self.run_hook("kernel-postrm", "upgrade 7.0.0-test.2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(module_dir.exists())
+        result = self.run_hook("kernel-postrm", "remove")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(module_dir.exists())
 
 
 if __name__ == "__main__":

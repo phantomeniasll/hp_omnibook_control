@@ -2,6 +2,9 @@
 set -eu
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 [ "$(id -u)" -eq 0 ] || { printf 'Run with sudo.\n' >&2; exit 1; }
+exec 9>/run/omnibook-install.lock
+flock -x 9
+
 service=omnibook-fan-curves.service
 battery_service=omnibook-charge-limit.service
 socket=omnibook-control.socket
@@ -37,7 +40,10 @@ fi
 rm -f "/etc/systemd/system/$service" "/etc/systemd/system/$battery_service" \
     "/etc/systemd/system/$socket" /etc/systemd/system/omnibook-control.service \
     /etc/systemd/system/omnibook-control@.service \
-    /usr/local/share/applications/hp-fan-curves.desktop /usr/local/bin/hp-charge-limit
+    /usr/local/share/applications/hp-fan-curves.desktop /usr/local/bin/hp-charge-limit \
+    /etc/kernel/postinst.d/omnibook-fan-curves \
+    /etc/kernel/header_postinst.d/omnibook-fan-curves \
+    /etc/kernel/postrm.d/omnibook-fan-curves
 if [ -d /usr/local/lib/omnibook-fan-curves ]; then
     rm -r /usr/local/lib/omnibook-fan-curves
 fi
