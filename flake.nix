@@ -24,6 +24,8 @@
               ./app
               ./tests
               ./packaging/mint/cinnamon-applet
+              ./packaging/mint/kernel-postinst
+              ./packaging/mint/kernel-postrm
             ];
           };
         in pkgs.runCommand "omnibook-fan-curves-tests" {

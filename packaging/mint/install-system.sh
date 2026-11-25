@@ -98,6 +98,20 @@ stage_module "$1" "$fan_module" "$2" omnibook_fan_probe
 if [ "$#" -eq 4 ]; then
     stage_module "$3" "$charge_module" "$4" omnibook_charge_control
 fi
+# Keep the verified modules from earlier installs and kernel hooks for other releases.
+for previous in "$dest"/*; do
+    [ -d "$previous" ] && [ ! -L "$previous" ] || continue
+    previous_release=${previous##*/}
+    [ "$previous_release" != "$release" ] || continue
+    previous_fan="$previous/omnibook-fan-probe.ko"
+    previous_charge="$previous/omnibook-charge-control.ko"
+    [ -f "$previous_fan" ] && [ ! -L "$previous_fan" ] || continue
+    install -d -m755 "$next/$previous_release"
+    install -p -m644 "$previous_fan" "$next/$previous_release/"
+    if [ "$#" -eq 4 ] && [ -f "$previous_charge" ] && [ ! -L "$previous_charge" ]; then
+        install -p -m644 "$previous_charge" "$next/$previous_release/"
+    fi
+done
 install -m644 "$source/app/"*.py "$source/app/curves.json" "$next/"
 install -m755 "$source/app/curve-python" "$source/app/open-curve-editor" "$source/app/thermal" "$next/"
 install -d -m755 "$next/driver-src"

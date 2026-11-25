@@ -12,6 +12,27 @@ src="$dest/driver-src"
 headers="/lib/modules/$kver/build"
 out="$dest/$kver"
 
+warn() {
+    printf 'omnibook-fan-curves: warning: %s (kernel %s).\n' "$1" "$kver" >&2
+}
+
+build=
+cleanup() {
+    result=$?
+    trap - EXIT
+    if [ -n "$build" ]; then
+        rm -rf -- "$build" || warn 'could not remove the temporary build directory'
+    fi
+    if [ "$result" -ne 0 ]; then
+        warn 'automatic module rebuild failed; rebuild manually if the modules are unavailable'
+    fi
+    exit 0
+}
+trap cleanup EXIT
+
+exec 9>/run/omnibook-install.lock
+flock -x 9
+
 [ -f "$src/Makefile" ] || exit 0
 [ -f "$headers/Makefile" ] || exit 0
 [ -r /sys/class/dmi/id/sys_vendor ] && [ "$(cat /sys/class/dmi/id/sys_vendor)" = HP ] || exit 0
@@ -22,18 +43,36 @@ if [ -f /etc/systemd/system/omnibook-charge-limit.service ]; then
     want_charge=true
 fi
 
+signatures_required() {
+    case "$(cat /sys/kernel/security/lockdown 2>/dev/null || true)" in
+        *'[integrity]'*|*'[confidentiality]'*) return 0 ;;
+    esac
+    [ "$(cat /sys/module/module/parameters/sig_enforce 2>/dev/null || true)" = Y ] && return 0
+
+    # efivarfs stores four attribute bytes before the Secure Boot flag.
+    secure_boot=/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c
+    [ -r "$secure_boot" ] &&
+        [ "$(od -An -tu1 -j4 -N1 "$secure_boot" | tr -d '[:space:]')" = 1 ]
+}
+
+require_signature=false
+if signatures_required; then
+    require_signature=true
+fi
+
 module_current() {
     mod="$1"
     expected_name="$2"
     [ -f "$mod" ] || return 1
-    [ ! "$src/Makefile" -nt "$mod" ] || return 1
     [ "$(modinfo -F name "$mod" 2>/dev/null || true)" = "$expected_name" ] || return 1
     ver=$(modinfo -F vermagic "$mod" 2>/dev/null || true)
     [ "${ver%% *}" = "$kver" ] || return 1
+    if "$require_signature"; then
+        [ -n "$(modinfo -F signer "$mod" 2>/dev/null || true)" ]
+    else
+        [ ! "$src/Makefile" -nt "$mod" ]
+    fi
 }
-
-exec 9>/run/omnibook-install.lock
-flock -x 9
 
 if module_current "$out/omnibook-fan-probe.ko" omnibook_fan_probe && \
    { ! "$want_charge" || module_current "$out/omnibook-charge-control.ko" omnibook_charge_control; }; then
@@ -41,9 +80,13 @@ if module_current "$out/omnibook-fan-probe.ko" omnibook_fan_probe && \
 fi
 
 warn_and_exit() {
-    printf 'omnibook-fan-curves: warning: %s (kernel %s); HP automatic control will remain active until rebuilt.\n' "$1" "$kver" >&2
+    warn "$1"
     exit 0
 }
+
+if "$require_signature"; then
+    warn_and_exit 'Secure Boot or kernel signature enforcement requires manually building and signing the OmniBook modules'
+fi
 
 command -v make >/dev/null 2>&1 || warn_and_exit 'make is not installed'
 if "$want_charge" && ! command -v iasl >/dev/null 2>&1; then
@@ -52,7 +95,6 @@ fi
 
 umask 022
 build=$(mktemp -d /usr/local/lib/.omnibook-kbuild.XXXXXX)
-trap 'rm -rf -- "$build"' EXIT
 cp -a -- "$src/." "$build/"
 
 if "$want_charge"; then
@@ -77,9 +119,11 @@ fi
 
 install -d -m755 "$out"
 install -m644 "$fan_ko" "$out/.omnibook-fan-probe.ko.new"
-mv -f -- "$out/.omnibook-fan-probe.ko.new" "$out/omnibook-fan-probe.ko"
 if "$want_charge"; then
     install -m644 "$charge_ko" "$out/.omnibook-charge-control.ko.new"
+fi
+mv -f -- "$out/.omnibook-fan-probe.ko.new" "$out/omnibook-fan-probe.ko"
+if "$want_charge"; then
     mv -f -- "$out/.omnibook-charge-control.ko.new" "$out/omnibook-charge-control.ko"
 fi
 
